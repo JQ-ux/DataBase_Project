@@ -135,9 +135,9 @@ def logout_view(request):
 def index(request):
     """
     Dashboard view showing user's simulations, market context, and performance metrics.
-    Updated to fetch NAV history for visualization and calculate key portfolio stats.
+    Includes NAV history for visualization and pre-calculated portfolio stats.
     """
-    # 1. Fetch all simulations for the current user, ordered by creation date
+    # 1. Fetch all simulations for the current user
     user_sims = Simulation.objects.filter(user=request.user).order_by('-created_at')
     
     # 2. Automatically create a default simulation if none exists
@@ -163,19 +163,24 @@ def index(request):
     active_sim = user_sims.first() 
     
     # 3. Fetch NAV history data for the performance chart
-    # Ordered by date ascending to ensure the timeline flows from left to right
     nav_history_qs = Simulation_NAV_History.objects.filter(sim=active_sim).order_by('record_date')
     
-    # Prepare data for Chart.js (Serialized to JSON for frontend integration)
+    # Prepare data for Chart.js
     chart_labels = [record.record_date.strftime("%m-%d") for record in nav_history_qs]
     chart_data = [float(record.nav) for record in nav_history_qs]
 
-    # 4. Fetch additional dashboard components
-    user_holdings = Simulation_Holding.objects.filter(sim=active_sim).exclude(quantity=0)
+    # 4. Fetch additional dashboard components with database-level calculation
+    # Using annotate to avoid 'multiply' filter errors in template
+    user_holdings = Simulation_Holding.objects.filter(
+        sim=active_sim
+    ).exclude(quantity=0).select_related('symbol').annotate(
+        market_value=F('quantity') * F('symbol__current_price')
+    )
+
     recent_actions = Simulation_Transaction.objects.filter(sim=active_sim).order_by('-created_at')[:5]
     top_movers = Company.objects.all().order_by('-market_cap')[:SEARCH_LIMIT]
     
-    # 5. Calculate real-time profit metrics for the dashboard header
+    # 5. Calculate real-time profit metrics
     total_profit = active_sim.current_nav - active_sim.initial_cash
     profit_rate = (total_profit / active_sim.initial_cash * 100) if active_sim.initial_cash else 0
     
@@ -185,10 +190,8 @@ def index(request):
         "holdings": user_holdings,
         "transactions": recent_actions,
         "sim": active_sim,
-        # Performance statistics
         "total_profit": total_profit,
         "profit_rate": round(profit_rate, 2),
-        # Charting data serialized as JSON strings
         "chart_labels_json": json.dumps(chart_labels),
         "chart_data_json": json.dumps(chart_data),
     })
@@ -321,20 +324,27 @@ def process_transaction(request):
                 price=exec_price, total_amount=total_cost
             )
 
-            # 8. Update NAV history and sync Simulation record
-            # Calculate real-time snapshot: Total NAV = Cash + Market Value
+            # ==========================================
+            # FINAL FIX STEP 8: Atomic Daily Snapshot
+            # ==========================================
             total_nav, market_val = calculate_nav_optimized(sim, date_obj)
-            
-            # Record this snapshot into history table
-            Simulation_NAV_History.objects.create(
+
+         
+            Simulation_NAV_History.objects.filter(
                 sim=sim, 
-                record_date=date_obj, 
+                record_date=date_obj
+            ).delete()
+
+      
+            Simulation_NAV_History.objects.create(
+                sim=sim,
+                record_date=date_obj,
                 nav=total_nav,
-                cash=sim.current_nav, 
+                cash=user.account_balance,
                 market_value=market_val
             )
 
-            # Critical: Sync the Simulation main table with the latest calculated NAV
+
             sim.current_nav = total_nav
             sim.save()
             # 9. Return Response
