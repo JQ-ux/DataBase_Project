@@ -1,0 +1,56 @@
+{% extends "stock/base.html" %}
+
+{% block body %}
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-md-4">
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-primary text-white text-center py-4 border-0" style="border-radius: 12px 12px 0 0;">
+                <i class="bi bi-shield-lock-fill fs-1"></i>
+                <h4 class="mt-2 fw-bold">StockX 账户登录</h4>
+            </div>
+            <div class="card-body p-4">
+                
+                {% if message %}
+                    <div class="alert alert-danger d-flex align-items-center" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <div>{{ message }}</div>
+                    </div>
+                {% endif %}
+
+                <form action="{% url 'login' %}" method="post">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label for="username" class="form-label small fw-bold text-muted text-uppercase">用户名</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-end-0"><i class="bi bi-person text-muted"></i></span>
+                            <input class="form-control border-start-0 bg-light" type="text" id="username" name="username" placeholder="请输入您的账号" required autofocus>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="password" class="form-label small fw-bold text-muted text-uppercase">安全密码</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-end-0"><i class="bi bi-key text-muted"></i></span>
+                            <input class="form-control border-start-0 bg-light" type="password" id="password" name="password" placeholder="请输入密码" required>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary w-100 py-2 fw-bold shadow-sm" type="submit">
+                        进入交易终端
+                    </button>
+                </form>
+
+                <div class="mt-4 text-center">
+                    <p class="text-muted small mb-0">还没有实盘模拟账号？</p>
+                    <a href="{% url 'register' %}" class="text-primary fw-bold text-decoration-none">立即注册领取 10万 模拟金 <i class="bi bi-arrow-right-short"></i></a>
+                </div>
+            </div>
+        </div>
+        
+        <p class="text-center mt-4 text-muted" style="font-size: 0.75rem;">
+            <i class="bi bi-info-circle me-1"></i> 这是一个模拟练习系统，请勿输入真实银行账户信息。
+        </p>
+    </div>
+</div>
+{% endblock %}

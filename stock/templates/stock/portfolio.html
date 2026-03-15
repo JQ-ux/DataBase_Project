@@ -1,0 +1,97 @@
+{% extends "stock/base.html" %}
+
+{% block body %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm bg-dark text-white">
+                <div class="card-body p-4">
+                    <div class="row align-items-center">
+                        <div class="col-md-4 border-end border-secondary">
+                            <h6 class="text-white-50 mb-1">当前总资产 (NAV)</h6>
+                            <h2 class="fw-bold mb-0">¥{{ sim.current_nav|floatformat:2 }}</h2>
+                            <p class="small mb-0 mt-2">
+                                <span class="text-white-50">初始资金: ¥{{ sim.initial_cash|floatformat:2 }}</span>
+                            </p>
+                        </div>
+                        <div class="col-md-4 border-end border-secondary px-md-4">
+                            <h6 class="text-white-50 mb-1">可用现金 (Cash)</h6>
+                            <h3 class="fw-bold mb-0 text-info">¥{{ sim.user.account_balance|floatformat:2 }}</h3>
+                        </div>
+                        <div class="col-md-4 px-md-4">
+                            <h6 class="text-white-50 mb-1">累计盈亏 / 收益率</h6>
+                            <h3 class="fw-bold mb-0 {% if stats.profit_amount >= 0 %}text-danger{% else %}text-success{% endif %}">
+                                ¥{{ stats.profit_amount|floatformat:2 }} 
+                                <span class="fs-6 fw-normal"> ({{ stats.profit_rate|floatformat:2 }}%)</span>
+                            </h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-briefcase me-2 text-primary"></i>我的持仓明细</h5>
+                    <span class="badge bg-light text-dark border">{{ holdings|length }} 支证券</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-4">股票代码</th>
+                                    <th>公司名称</th>
+                                    <th>持仓数量</th>
+                                    <th>平均成本</th>
+                                    <th>当前价格</th>
+                                    <th>持仓市值</th>
+                                    <th class="text-end pe-4">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for hold in holdings %}
+                                <tr>
+                                    <td class="ps-4">
+                                        <a href="{% url 'stock_detail' hold.symbol.symbol %}" class="fw-bold text-decoration-none">
+                                            {{ hold.symbol.symbol }}
+                                        </a>
+                                    </td>
+                                    <td>{{ hold.symbol.full_name }}</td>
+                                    <td><span class="badge bg-secondary">{{ hold.quantity }}</span></td>
+                                    <td>¥{{ hold.avg_cost|floatformat:2 }}</td>
+                                    <td class="fw-bold">¥{{ hold.symbol.current_price|floatformat:2 }}</td>
+                                    <td class="text-primary fw-bold">
+                                        ¥{{ hold.market_value|floatformat:2 }}
+                                    </td>
+                                    <td class="text-end pe-4">
+                                        <a href="{% url 'stock_detail' hold.symbol.symbol %}" class="btn btn-sm btn-outline-primary">交易</a>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="7" class="text-center py-5">
+                                        <div class="text-muted">
+                                            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                                            目前还没有任何持仓，去<a href="{% url 'index' %}" class="mx-1">市场看一看</a>吧。
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .bg-soft-danger { background-color: rgba(220, 53, 69, 0.1); }
+    .bg-soft-success { background-color: rgba(25, 135, 84, 0.1); }
+</style>
+{% endblock %}
