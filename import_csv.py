@@ -3,7 +3,7 @@ import csv
 import django
 import sys
 from decimal import Decimal
-
+from datetime import datetime
 # ==========================================
 # 1. 环境初始化 (针对 capstone 项目)
 # ==========================================
@@ -78,37 +78,51 @@ def import_financials():
                 continue
 
 def import_daily_prices():
-    print("正在导入每日股价（批量写入中...）")
+    print("正在增量导入每日股价...")
     if not os.path.exists(PRICES_CSV):
         return
+    
+    # 获取数据库中已有的 (symbol, date) 组合，防止重复导入
+    existing_records = set(
+        DailyPrice.objects.values_list('symbol__symbol', 'trade_date')
+    )
+
     with open(PRICES_CSV, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         prices_to_create = []
         count = 0
+        skipped = 0
+
         for row in reader:
-            try:
-                comp = Company.objects.get(symbol=row['symbol'])
-                prices_to_create.append(DailyPrice(
-                    symbol=comp,
-                    trade_date=row['trade_date'],
-                    open_price=Decimal(row['open_price']),
-                    high_price=Decimal(row['high_price']),
-                    low_price=Decimal(row['low_price']),
-                    close_price=Decimal(row['close_price']),
-                    volume=int(float(row['volume'])) if row.get('volume') else 0
-                ))
-                if len(prices_to_create) >= 1000:
-                    DailyPrice.objects.bulk_create(prices_to_create)
-                    count += len(prices_to_create)
-                    prices_to_create = []
-                    print(f"已写入 {count} 条...")
-            except Company.DoesNotExist:
-                continue
+            # 逻辑：如果 (股票代码, 日期) 不在现有记录中，才执行导入
+            trade_date_obj = datetime.strptime(row['trade_date'], '%Y-%m-%d').date()
+            if (row['symbol'], trade_date_obj) not in existing_records:
+                try:
+                    comp = Company.objects.get(symbol=row['symbol'])
+                    prices_to_create.append(DailyPrice(
+                        symbol=comp,
+                        trade_date=row['trade_date'],
+                        open_price=Decimal(row['open_price']),
+                        high_price=Decimal(row['high_price']),
+                        low_price=Decimal(row['low_price']),
+                        close_price=Decimal(row['close_price']),
+                        volume=int(float(row['volume'])) if row.get('volume') else 0
+                    ))
+                except Company.DoesNotExist:
+                    continue
+            else:
+                skipped += 1
+
+            if len(prices_to_create) >= 1000:
+                DailyPrice.objects.bulk_create(prices_to_create)
+                count += len(prices_to_create)
+                prices_to_create = []
+
         if prices_to_create:
             DailyPrice.objects.bulk_create(prices_to_create)
             count += len(prices_to_create)
-    print(f"全部完成！共 {count} 条股价记录。")
-
+            
+    print(f"全部完成！新增: {count} 条，跳过(已存在): {skipped} 条。")
 if __name__ == "__main__":
     import_companies()
     import_financials()

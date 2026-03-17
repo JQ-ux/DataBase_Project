@@ -1,21 +1,43 @@
 from django.urls import path
 from . import views
 
+# Global error handlers
+handler404 = 'stock.views.custom_404'
+handler500 = 'stock.views.custom_500'
+
 urlpatterns = [
+    # ==========================================
+    # 1. Core Pages
+    # ==========================================
     path("", views.index, name="index"),
     path("portfolio/", views.portfolio_view, name="portfolio"),
     path("transactions/", views.transactions_view, name="transactions"),
 
+    # ==========================================
+    # 2. Authentication
+    # ==========================================
     path("login/", views.login_view, name="login"),
     path("register/", views.register_view, name="register"),
     path("logout/", views.logout_view, name="logout"),
 
-    path("api/search/", views.api_search, name="api_search"),
-    path("api/trade/", views.process_transaction, name="process_transaction"),
-
+    # ==========================================
+    # 3. Market Data
+    # ==========================================
     path("stock/<str:symbol>/", views.stock_detail, name="stock_detail"),
     path("stock/<str:symbol>/financials/", views.company_financials, name="company_financials"),
     path("stock/<str:symbol>/history/", views.stock_history_full, name="stock_history"), 
-    
-    path("simulation/<int:sim_id>/report/", views.simulation_performance, name="simulation_performance"),
+
+    # ==========================================
+    # 4. Exchange Core API
+    # ==========================================
+    path("api/search/", views.api_search, name="api_search"),
+    path("api/v1/search/", views.api_search, name="api_search_v1"),
+    path("api/v1/trades/", views.process_transaction, name="process_transaction"),
+    path("api/v1/order/cancel/<int:order_id>/", views.cancel_order, name="cancel_order"),
+
+    # ==========================================
+    # 5. Simulation Control
+    # ==========================================
+    path("simulation/advance/", views.advance_simulation_date, name="advance_date"),
+    path("simulation/report/", views.simulation_performance, name="simulation_performance"),
 ]

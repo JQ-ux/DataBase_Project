@@ -77,5 +77,8 @@ USE_TZ = True
 
 # 10. 静态文件配置 (CSS, JS, 你的图片)
 STATIC_URL = 'static/'
-
+import os
+STATICFILES_DIRS = [
+    BASE_DIR / "stock" / "static", 
+]
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

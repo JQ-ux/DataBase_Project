@@ -62,10 +62,11 @@ def fetch_all_data():
             print(f"跳过 {symbol}，原因: {e}")
 
     # --- 导出 CSV ---
-    pd.DataFrame(company_list).to_csv('Data/companies.csv', index=False)
-    pd.DataFrame(financials_list).to_csv('Data/financials.csv', index=False)
-    pd.DataFrame(daily_prices_list).to_csv('Data/daily_prices.csv', index=False)
-    print("\n数据抓取任务已完成！已生成 3 个 CSV 文件。")
-
+    # --- 导出 CSV (将 'Data/' 去掉，直接写文件名) ---
+    pd.DataFrame(company_list).to_csv('companies.csv', index=False)
+    pd.DataFrame(financials_list).to_csv('financials.csv', index=False)
+    pd.DataFrame(daily_prices_list).to_csv('daily_prices.csv', index=False)
+    
+    print("\n数据抓取任务已完成！CSV 已保存在当前文件夹。")
 if __name__ == "__main__":
     fetch_all_data()

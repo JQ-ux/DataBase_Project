@@ -1,29 +1,39 @@
 {% extends "stock/base.html" %}
 
 {% block body %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <div class="container mt-4">
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card border-0 shadow-sm bg-dark text-white">
+            <div class="card border-0 shadow-sm bg-dark text-white overflow-hidden" style="border-radius: 12px;">
                 <div class="card-body p-4">
                     <div class="row align-items-center">
                         <div class="col-md-4 border-end border-secondary">
-                            <h6 class="text-white-50 mb-1">当前总资产 (NAV)</h6>
-                            <h2 class="fw-bold mb-0">¥{{ sim.current_nav|floatformat:2 }}</h2>
+                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">当前总资产 (NAV)</h6>
+                            <h2 class="fw-bold mb-0 text-primary-emphasis">¥{{ total_assets|floatformat:2 }}</h2>
                             <p class="small mb-0 mt-2">
-                                <span class="text-white-50">初始资金: ¥{{ sim.initial_cash|floatformat:2 }}</span>
+                                <span class="text-white-50">初始本金: ¥{{ sim.initial_cash|floatformat:2 }}</span>
                             </p>
                         </div>
+                        
                         <div class="col-md-4 border-end border-secondary px-md-4">
-                            <h6 class="text-white-50 mb-1">可用现金 (Cash)</h6>
-                            <h3 class="fw-bold mb-0 text-info">¥{{ sim.user.account_balance|floatformat:2 }}</h3>
+                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">可用资金 (CASH)</h6>
+                            <h3 class="fw-bold mb-0 text-info">¥{{ sim.available_cash|floatformat:2 }}</h3>
+                            <p class="small mb-0 mt-2">
+                                <span class="text-white-50">持仓市值: ¥{{ total_stock_value|floatformat:2 }}</span>
+                            </p>
                         </div>
+                        
                         <div class="col-md-4 px-md-4">
-                            <h6 class="text-white-50 mb-1">累计盈亏 / 收益率</h6>
-                            <h3 class="fw-bold mb-0 {% if stats.profit_amount >= 0 %}text-danger{% else %}text-success{% endif %}">
-                                ¥{{ stats.profit_amount|floatformat:2 }} 
-                                <span class="fs-6 fw-normal"> ({{ stats.profit_rate|floatformat:2 }}%)</span>
+                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">累计盈亏 / 收益率</h6>
+                            <h3 class="fw-bold mb-0 {% if total_pnl >= 0 %}text-danger{% else %}text-success{% endif %}">
+                                {% if total_pnl >= 0 %}+{% endif %}¥{{ total_pnl|floatformat:2 }} 
+                                <span class="fs-6 fw-normal"> ({{ pnl_percent|floatformat:2 }}%)</span>
                             </h3>
+                            <p class="small mb-0 mt-2">
+                                <span class="text-white-50">模拟进度: {{ sim.current_virtual_date|date:"Y-m-d" }}</span>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -32,51 +42,71 @@
     </div>
 
     <div class="row">
-        <div class="col-12">
-            <div class="card shadow-sm border-0">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-briefcase me-2 text-primary"></i>我的持仓明细</h5>
-                    <span class="badge bg-light text-dark border">{{ holdings|length }} 支证券</span>
+        <div class="col-lg-4 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-3 border-bottom">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-graph-up-arrow me-2 text-primary"></i>净值曲线</h5>
                 </div>
+                <div class="card-body">
+                    <canvas id="equityChart" style="min-height: 250px;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
+                    <h5 class="mb-0 fw-bold">
+                        <i class="bi bi-briefcase me-2 text-primary"></i>持仓明细 (Portfolio)
+                    </h5>
+                    <a href="{% url 'index' %}" class="btn btn-sm btn-outline-primary">去买入</a>
+                </div>
+                
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead class="table-light">
-                                <tr>
-                                    <th class="ps-4">股票代码</th>
-                                    <th>公司名称</th>
-                                    <th>持仓数量</th>
-                                    <th>平均成本</th>
-                                    <th>当前价格</th>
-                                    <th>持仓市值</th>
+                                <tr class="x-small text-muted text-uppercase">
+                                    <th class="ps-4">代码</th>
+                                    <th>名称</th>
+                                    <th>数量</th>
+                                    <th>成本/现价</th>
+                                    <th>市值</th>
+                                    <th>盈亏 (浮动)</th>
                                     <th class="text-end pe-4">操作</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for hold in holdings %}
+                                {% for item in holdings_detailed %}
                                 <tr>
                                     <td class="ps-4">
-                                        <a href="{% url 'stock_detail' hold.symbol.symbol %}" class="fw-bold text-decoration-none">
-                                            {{ hold.symbol.symbol }}
+                                        <a href="{% url 'stock_detail' item.symbol %}" class="fw-bold text-decoration-none">
+                                            {{ item.symbol }}
                                         </a>
                                     </td>
-                                    <td>{{ hold.symbol.full_name }}</td>
-                                    <td><span class="badge bg-secondary">{{ hold.quantity }}</span></td>
-                                    <td>¥{{ hold.avg_cost|floatformat:2 }}</td>
-                                    <td class="fw-bold">¥{{ hold.symbol.current_price|floatformat:2 }}</td>
-                                    <td class="text-primary fw-bold">
-                                        ¥{{ hold.market_value|floatformat:2 }}
+                                    <td><span class="text-muted small">{{ item.company_name }}</span></td>
+                                    <td><span class="badge bg-secondary-subtle text-secondary px-2">{{ item.quantity }}</span></td>
+                                    <td>
+                                        <div class="small">成: ¥{{ item.avg_cost|floatformat:2 }}</div>
+                                        <div class="fw-bold text-primary">现: ¥{{ item.current_price|floatformat:2 }}</div>
+                                    </td>
+                                    <td class="fw-bold text-dark">¥{{ item.market_value|floatformat:2 }}</td>
+                                    <td class="fw-bold {% if item.pnl >= 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {% if item.pnl >= 0 %}+{% endif %}¥{{ item.pnl|floatformat:2 }}
+                                        <div class="x-small fw-normal">({{ item.pnl_percent|floatformat:2 }}%)</div>
                                     </td>
                                     <td class="text-end pe-4">
-                                        <a href="{% url 'stock_detail' hold.symbol.symbol %}" class="btn btn-sm btn-outline-primary">交易</a>
+                                        <a href="{% url 'stock_detail' item.symbol %}" class="btn btn-sm btn-outline-primary">
+                                            详情
+                                        </a>
                                     </td>
                                 </tr>
                                 {% empty %}
                                 <tr>
                                     <td colspan="7" class="text-center py-5">
                                         <div class="text-muted">
-                                            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-                                            目前还没有任何持仓，去<a href="{% url 'index' %}" class="mx-1">市场看一看</a>吧。
+                                            <i class="bi bi-inbox fs-1 d-block mb-3 opacity-25"></i>
+                                            <p class="mb-0">当前暂无持仓股份</p>
                                         </div>
                                     </td>
                                 </tr>
@@ -91,7 +121,45 @@
 </div>
 
 <style>
-    .bg-soft-danger { background-color: rgba(220, 53, 69, 0.1); }
-    .bg-soft-success { background-color: rgba(25, 135, 84, 0.1); }
+    .tracking-wider { letter-spacing: 0.05rem; }
+    .bg-dark { background-color: #1a1d20 !important; }
+    .table-hover tbody tr:hover { background-color: rgba(0,0,0,.01); }
+    .x-small { font-size: 0.75rem; }
+    .text-primary-emphasis { color: #82b1ff !important; }
 </style>
+
+<script>
+    // 渲染净值图表
+    const ctx = document.getElementById('equityChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels|safe }},
+            datasets: [{
+                label: '账户总资产 (NAV)',
+                data: {{ chart_values|safe }},
+                borderColor: '#0d6efd',
+                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { grid: { display: false } },
+                y: { 
+                    beginAtZero: false,
+                    grid: { color: 'rgba(0,0,0,0.05)' }
+                }
+            }
+        }
+    });
+</script>
 {% endblock %}
