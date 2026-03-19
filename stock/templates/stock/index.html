@@ -23,7 +23,7 @@
     <div class="row g-3 mb-4">
         <div class="col-md-3">
             <div class="card border-0 shadow-sm p-3 bg-primary text-white">
-                <small class="opacity-75 fw-bold">账户总资产 (NAV)</small>
+                <small class="opacity-75 fw-bold">账户总资产 </small>
                 <h3 class="mb-0 fw-bold">${{ sim.current_nav|floatformat:2 }}</h3>
                 <div class="progress mt-2" style="height: 4px; background: rgba(255,255,255,0.2);">
                     <div class="progress-bar bg-white" style="width: 70%"></div>
@@ -71,7 +71,28 @@
             <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-search text-info me-2"></i>市场探索</h5>
-                    <span class="badge bg-light text-dark">今日活跃股票</span>
+                    
+                    <div class="d-flex align-items-center">
+                        <div class="dropdown me-2">
+                            <button class="btn btn-sm btn-outline-primary dropdown-toggle fw-bold" type="button" id="industryDropdown" data-bs-toggle="dropdown">
+                                <i class="bi bi-filter-circle me-1"></i> 选择行业
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end shadow" style="max-height: 300px; overflow-y: auto;">
+                                <li><a class="dropdown-item" href="{% url 'index' %}">全部行业</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                {% for ind in industries %}
+                                <li>
+                                    <a class="dropdown-item {% if current_industry == ind.id|stringformat:'s' %}active{% endif %}" href="?industry={{ ind.id }}">
+                                        {{ ind.name }}
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <span class="badge bg-light text-dark border">
+                            {% if current_industry %} 筛选中 {% else %} 今日活跃 {% endif %}
+                        </span>
+                    </div>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
@@ -100,7 +121,7 @@
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="6" class="text-center py-4 text-muted">未找到相关公司行情数据，请检查数据日期是否匹配。</td></tr>
+                            <tr><td colspan="6" class="text-center py-4 text-muted">未找到相关数据。</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -148,7 +169,8 @@
                     </table>
                 </div>
             </div>
-        </div>
+        </div> 
+            
 
         <div class="col-lg-4">
             <div class="card border-0 shadow-sm mb-4">
@@ -188,7 +210,7 @@
                     <div class="list-group-item border-0 py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <small class="d-block text-muted">{{ t.trade_date|date:"m-d H:i" }}</small>
+                                <small class="d-block text-muted">{{ t.trade_date|date:"m-d" }}</small>
                                 <span class="fw-bold">{{ t.symbol.symbol }}</span>
                             </div>
                             <div class="text-end">

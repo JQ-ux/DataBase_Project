@@ -23,9 +23,27 @@ class User(AbstractUser):
 # ==========================================
 # 2. Market Reference Data
 # ==========================================
+class Industry(models.Model):
+    """
+    Industry Model
+    """
+    name = models.CharField(max_length=100, unique=True)
+    sector = models.CharField(max_length=100, blank=True, null=True) # 对应你看到的 Sector: Technology
+    description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.name
+    
 class Company(models.Model):
     symbol = models.CharField(max_length=10, primary_key=True)
     full_name = models.CharField(max_length=255)
+    industry = models.ForeignKey(
+        Industry, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='companies'
+    )
     market_cap = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
     trailing_pe = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     price_sales = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -42,6 +60,41 @@ class Financials(models.Model):
     operating_income = models.BigIntegerField(null=True, blank=True)
     net_income = models.BigIntegerField(null=True, blank=True)
     basic_eps = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    total_assets = models.BigIntegerField(null=True, blank=True)           
+    total_liabilities = models.BigIntegerField(null=True, blank=True)      
+    current_assets = models.BigIntegerField(null=True, blank=True)         
+    current_liabilities = models.BigIntegerField(null=True, blank=True)  
+    inventory = models.BigIntegerField(null=True, blank=True, default=0)
+    
+
+    @property
+    def current_ratio(self):
+        """Liquidity: Current Assets / Current Liabilities"""
+        if self.current_liabilities and self.current_liabilities != 0:
+            return round(self.current_assets / self.current_liabilities, 2)
+        return 0
+
+    @property
+    def quick_ratio(self):
+        """Liquidity: (Current Assets - Inventory) / Current Liabilities"""
+        if self.current_liabilities and self.current_liabilities != 0:
+            inv = self.inventory if self.inventory else 0
+            return round((self.current_assets - inv) / self.current_liabilities, 2)
+        return 0
+
+    @property
+    def debt_asset_ratio(self):
+        """Leverage: (Total Liabilities / Total Assets) * 100"""
+        if self.total_assets and self.total_assets != 0:
+            return round((self.total_liabilities / self.total_assets) * 100, 2)
+        return 0
+
+    @property
+    def net_margin(self):
+        """Profitability: (Net Income / Total Revenue) * 100"""
+        if self.total_revenue and self.total_revenue != 0:
+            return round((self.net_income / self.total_revenue) * 100, 2)
+        return 0
 
 class DailyPrice(models.Model):
     symbol = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='daily_prices')
@@ -148,6 +201,14 @@ class TradeOrder(models.Model):
     status = models.CharField(max_length=10, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     order_date = models.DateField() # The virtual date when the order was placed
     created_at = models.DateTimeField(auto_now_add=True)
+    # 在 TradeOrder 类中添加
+    avg_cost_snapshot = models.DecimalField(
+        max_digits=18, 
+        decimal_places=4, 
+        null=True, 
+        blank=True,
+        default=0
+    )
 
     class Meta:
         indexes = [
@@ -171,7 +232,8 @@ class Simulation_Transaction(models.Model):
     total_amount = models.DecimalField(max_digits=20, decimal_places=4)
     created_at = models.DateTimeField(auto_now_add=True)
     matched_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, blank=True)
-    opponent_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, related_name='counterpart_transactions')
+    opponent_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, blank=True,related_name='counterpart_transactions')
+    realized_pnl = models.DecimalField(max_digits=18, decimal_places=4, default=0)
 
     
 class Simulation_Cash_Flow(models.Model):

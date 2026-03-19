@@ -4,14 +4,14 @@ import django
 import sys
 from decimal import Decimal
 from datetime import datetime
+
 # ==========================================
-# 1. 环境初始化 (针对 capstone 项目)
+# 1. 环境初始化
 # ==========================================
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# 核心修正：你的配置文件夹叫 capstone
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'capstone.settings') 
 
 try:
@@ -20,19 +20,29 @@ except Exception as e:
     print(f"Django 初始化失败: {e}")
     sys.exit(1)
 
-# 导入模型
-from stock.models import Company, Financials, DailyPrice
+# 导入所有相关模型
+from stock.models import Company, Financials, DailyPrice, Industry
 
 # ==========================================
-# 2. 配置 CSV 文件路径
+# 2. 配置 CSV 文件路径 (指向 Data 文件夹)
 # ==========================================
 BASE_DIR = r"C:\Users\24300\Desktop\Stock\Data"
 COMPANIES_CSV = os.path.join(BASE_DIR, "companies.csv")
 FINANCIALS_CSV = os.path.join(BASE_DIR, "financials.csv")
 PRICES_CSV = os.path.join(BASE_DIR, "daily_prices.csv")
 
+def clean_val(val, default=0):
+    """处理空字符串、N/A 或无效数值"""
+    if not val or val == 'N/A' or val == '':
+        return default
+    try:
+        # float(val) 可以处理科学计数法如 2.15E+11
+        return float(val)
+    except ValueError:
+        return default
+
 def import_companies():
-    print("正在导入公司档案...")
+    print("正在导入行业与公司档案...")
     if not os.path.exists(COMPANIES_CSV):
         print(f"错误：找不到文件 {COMPANIES_CSV}")
         return
@@ -41,48 +51,72 @@ def import_companies():
         reader = csv.DictReader(f)
         count = 0
         for row in reader:
+            # 1. 先处理 Industry 表 (get_or_create 避免重复)
+            industry_name = row.get('industry', 'Other')
+            sector_name = row.get('sector', 'Other')
+            
+            industry_obj, _ = Industry.objects.get_or_create(
+                name=industry_name,
+                defaults={'sector': sector_name}
+            )
+
+            # 2. 更新或创建公司信息，并关联 Industry
             Company.objects.update_or_create(
                 symbol=row['symbol'],
                 defaults={
                     'full_name': row['full_name'],
-                    'market_cap': Decimal(row['market_cap']) if row.get('market_cap') else None,
-                    'trailing_pe': Decimal(row['trailing_pe']) if row.get('trailing_pe') else None,
-                    'price_sales': Decimal(row['price_sales']) if row.get('price_sales') else None,
-                    'current_price': Decimal(row['current_price']) if row.get('current_price') else None,
+                    'industry': industry_obj,
+                    'market_cap': Decimal(str(clean_val(row.get('market_cap')))) if row.get('market_cap') else None,
+                    'trailing_pe': Decimal(str(clean_val(row.get('trailing_pe')))) if row.get('trailing_pe') else None,
+                    'price_sales': Decimal(str(clean_val(row.get('price_sales')))) if row.get('price_sales') else None,
+                    'current_price': Decimal(str(clean_val(row.get('current_price')))) if row.get('current_price') else None,
                 }
             )
             count += 1
-    print(f"成功导入/更新 {count} 家公司。")
+    print(f"成功导入/更新 {count} 家公司及其行业分类。")
 
 def import_financials():
-    print("正在导入财务报表...")
+    print("正在导入详细财务报表 (包含资产负债数据)...")
     if not os.path.exists(FINANCIALS_CSV):
+        print(f"错误：找不到文件 {FINANCIALS_CSV}")
         return
     with open(FINANCIALS_CSV, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
+        count = 0
         for row in reader:
             try:
                 comp = Company.objects.get(symbol=row['symbol'])
-                Financials.objects.get_or_create(
+                # 处理日期格式 (兼容 2026/1/31 或 2026-01-31)
+                date_str = row['report_date'].replace('/', '-')
+                
+                Financials.objects.update_or_create(
                     symbol=comp,
-                    report_date=row['report_date'],
+                    report_date=date_str,
                     defaults={
-                        'total_revenue': int(float(row['total_revenue'])) if row.get('total_revenue') else 0,
-                        'gross_profit': int(float(row['gross_profit'])) if row.get('gross_profit') else 0,
-                        'operating_income': int(float(row['operating_income'])) if row.get('operating_income') else 0,
-                        'net_income': int(float(row['net_income'])) if row.get('net_income') else 0,
-                        'basic_eps': Decimal(row['basic_eps']) if row.get('basic_eps') else 0,
+                        'total_revenue': int(clean_val(row.get('total_revenue'))),
+                        'gross_profit': int(clean_val(row.get('gross_profit'))),
+                        'operating_income': int(clean_val(row.get('operating_income'))),
+                        'net_income': int(clean_val(row.get('net_income'))),
+                        'basic_eps': Decimal(str(clean_val(row.get('basic_eps')))),
+                        # 新增资产负债字段
+                        'total_assets': int(clean_val(row.get('total_assets'))),
+                        'total_liabilities': int(clean_val(row.get('total_liabilities'))),
+                        'current_assets': int(clean_val(row.get('current_assets'))),
+                        'current_liabilities': int(clean_val(row.get('current_liabilities'))),
+                        'inventory': int(clean_val(row.get('inventory', 0))),
                     }
                 )
+                count += 1
             except Company.DoesNotExist:
                 continue
+    print(f"成功导入 {count} 条财务报表记录。")
 
 def import_daily_prices():
-    print("正在增量导入每日股价...")
+    print("正在同步历史股价...")
     if not os.path.exists(PRICES_CSV):
+        print("未找到股价文件，跳过。")
         return
     
-    # 获取数据库中已有的 (symbol, date) 组合，防止重复导入
     existing_records = set(
         DailyPrice.objects.values_list('symbol__symbol', 'trade_date')
     )
@@ -94,7 +128,6 @@ def import_daily_prices():
         skipped = 0
 
         for row in reader:
-            # 逻辑：如果 (股票代码, 日期) 不在现有记录中，才执行导入
             trade_date_obj = datetime.strptime(row['trade_date'], '%Y-%m-%d').date()
             if (row['symbol'], trade_date_obj) not in existing_records:
                 try:
@@ -102,11 +135,11 @@ def import_daily_prices():
                     prices_to_create.append(DailyPrice(
                         symbol=comp,
                         trade_date=row['trade_date'],
-                        open_price=Decimal(row['open_price']),
-                        high_price=Decimal(row['high_price']),
-                        low_price=Decimal(row['low_price']),
-                        close_price=Decimal(row['close_price']),
-                        volume=int(float(row['volume'])) if row.get('volume') else 0
+                        open_price=Decimal(str(clean_val(row['open_price']))),
+                        high_price=Decimal(str(clean_val(row['high_price']))),
+                        low_price=Decimal(str(clean_val(row['low_price']))),
+                        close_price=Decimal(str(clean_val(row['close_price']))),
+                        volume=int(clean_val(row.get('volume')))
                     ))
                 except Company.DoesNotExist:
                     continue
@@ -122,7 +155,8 @@ def import_daily_prices():
             DailyPrice.objects.bulk_create(prices_to_create)
             count += len(prices_to_create)
             
-    print(f"全部完成！新增: {count} 条，跳过(已存在): {skipped} 条。")
+    print(f"股价同步完成！新增: {count} 条，跳过(已存在): {skipped} 条。")
+
 if __name__ == "__main__":
     import_companies()
     import_financials()

@@ -1,16 +1,16 @@
-symbol,full_name,market_cap,trailing_pe,price_sales,current_price
-NVDA,NVIDIA Corporation,4380976218112,36.785713,20.28812,180.25
-AAPL,Apple Inc.,3676245065728,31.660759,8.439168,250.12
-TSLA,"Tesla, Inc.",1467951349760,355.63635,15.4803095,391.2
-GOOGL,Alphabet Inc.,3656681259008,27.937155,9.077345,302.28
-AMZN,"Amazon.com, Inc.",2229321072640,29.00419,3.109564,207.67
-MSFT,Microsoft Corporation,2939877064704,24.752815,9.624646,395.55
-META,"Meta Platforms, Inc.",1552413491200,26.104212,7.724757,613.71
-AAL,American Airlines Group Inc.,6801137152,60.588234,0.12448771,10.3
-INTC,Intel Corporation,228629315584,,4.3257585,45.77
-PLTR,Palantir Technologies Inc.,361023438848,239.60316,80.667595,150.95
-SOFI,"SoFi Technologies, Inc.",22648686592,45.538464,6.32109,17.76
-AMD,"Advanced Micro Devices, Inc.",315305164800,74.09579,9.102606,193.39
-NFLX,"Netflix, Inc.",404294467584,37.671936,8.947926,95.31
-PYPL,"PayPal Holdings, Inc.",42010775552,8.299446,1.2664529,44.9
-BAC,Bank of America Corporation,341172617216,12.262467,3.1760032,46.72
+symbol,full_name,industry,sector,market_cap,trailing_pe,price_sales,current_price
+NVDA,NVIDIA Corporation,Semiconductors,Technology,4384621854720,36.741344,20.305002,180.4
+AAPL,Apple Inc.,Consumer Electronics,Technology,3673599508480,31.637974,8.433095,249.94
+TSLA,"Tesla, Inc.",Auto Manufacturers,Consumer Cyclical,1473880129536,370.54718,15.542831,392.78
+GOOGL,Alphabet Inc.,Internet Content & Information,Communication Services,3722126032896,28.489815,9.239805,307.69
+AMZN,"Amazon.com, Inc.",Internet Retail,Consumer Cyclical,2252937625600,29.229805,3.1425056,209.87
+MSFT,Microsoft Corporation,Software - Infrastructure,Technology,2911931465728,24.50219,9.533157,391.79
+META,"Meta Platforms, Inc.",Internet Content & Information,Communication Services,1557396717568,26.17687,7.749553,615.68
+AAL,American Airlines Group Inc.,Airlines,Industrials,7131289600,63.52941,0.1305308,10.8
+INTC,Intel Corporation,Semiconductors,Technology,224932888576,,4.2558208,45.03
+PLTR,Palantir Technologies Inc.,Software - Infrastructure,Technology,365376307200,242.49207,81.640205,152.77
+SOFI,"SoFi Technologies, Inc.",Credit Services,Financial Services,21909032960,44.051285,6.114658,17.18
+AMD,"Advanced Micro Devices, Inc.",Semiconductors,Technology,325201756160,76.42146,9.388312,199.46
+NFLX,"Netflix, Inc.",Entertainment,Communication Services,401706942464,37.43083,8.890658,94.7
+PYPL,"PayPal Holdings, Inc.",Credit Services,Financial Services,41720721408,8.242145,1.2577089,44.59
+BAC,Bank of America Corporation,Banks - Diversified,Financial Services,341975891968,12.291339,3.183481,46.83

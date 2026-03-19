@@ -4,145 +4,131 @@ import random
 from decimal import Decimal
 from datetime import timedelta, date
 
-# 1. 环境初始化
+# 1. Django 环境初始化
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'capstone.settings')
 django.setup()
 
+from django.db import transaction
 from stock.models import (
     User, Company, Simulation, Simulation_Holding, 
-    Simulation_Transaction, Simulation_NAV_History
+    Simulation_Transaction, Simulation_NAV_History, 
+    TradeOrder, DailyPrice, GlobalSimulationState
 )
-from django.utils import timezone
 
-def run_multi_user_simulation():
-    # 获取两个核心账号
+try:
+    from stock.views import internal_matching_engine, calculate_nav_optimized
+except ImportError:
+    print("错误：无法从 stock.views 导入核心函数。")
+    exit()
+
+def run_engine_simulation():
+    # 获取测试用户
     try:
-        user_a = User.objects.get(username='jinqi')
-        user_b = User.objects.get(username='Jinqi')
-    except User.DoesNotExist:
-        print("❌ 错误：请确保用户名 'jinqi' 和 'Jinqi' 都已注册。")
+        sim_a = Simulation.objects.get(user__username='jinqi')
+        sim_b = Simulation.objects.get(user__username='Jinqi')
+    except Exception:
+        print("错误：请确保用户 jinqi 和 Jinqi 及其 Simulation 已创建。")
         return
 
-    # 获取两人的 LIVE 模式模拟器
-    sim_a = Simulation.objects.filter(user=user_a, mode='LIVE').first()
-    sim_b = Simulation.objects.filter(user=user_b, mode='LIVE').first()
-    
-    if not sim_a or not sim_b:
-        print("❌ 错误：其中一个账号缺少 LIVE 模式的 Simulation 实例。")
-        return
-
-    print(f"🧹 正在重置 {user_a.username} 和 {user_b.username} 的 3 月历史数据...")
-    
-    # 清理指定时间段的数据，防止重复运行导致图表错乱
-    for s in [sim_a, sim_b]:
-        Simulation_NAV_History.objects.filter(sim=s).delete()
-        Simulation_Transaction.objects.filter(sim=s).delete()
-        Simulation_Holding.objects.filter(sim=s).delete()
-        s.available_cash = Decimal('100000.0000')
-        s.save()
-
-    try:
-        target_stock = Company.objects.get(symbol='NVDA')
-    except Company.DoesNotExist:
-        print("❌ 错误：数据库中找不到 NVDA。")
-        return
-
-    start_date = date(2026, 3, 2)
+    # --- 1. 数据彻底重置 ---
+    start_test_date = date(2026, 3, 2)
     end_date = date(2026, 3, 12)
-    current_day = start_date
+    
+    print(f"⏳ 正在初始化测试环境 (2026-03-02)...")
+    
+    with transaction.atomic():
+        for s in [sim_a, sim_b]:
+            Simulation_NAV_History.objects.filter(sim=s).delete()
+            Simulation_Transaction.objects.filter(sim=s).delete()
+            TradeOrder.objects.filter(sim=s).delete()
+            Simulation_Holding.objects.filter(sim=s).delete()
+            s.available_cash = Decimal('100000.0000') # 初始资金 10万
+            s.save()
 
-    print(f"🚀 开始全真对倒交易模拟: {start_date} -> {end_date}\n")
+    company_pool = list(Company.objects.all()[:15]) # 增加股票池范围
+    current_day = start_test_date
 
     while current_day <= end_date:
-        # 排除周末
-        if current_day.weekday() >= 5:
-            print(f"📅 {current_day} [休市]")
-        else:
-            # 同步两人的虚拟日期
-            for s in [sim_a, sim_b]:
-                s.current_virtual_date = current_day
-                s.save()
+        if current_day.weekday() >= 5: 
+            current_day += timedelta(days=1)
+            continue
+        
+        print(f"📅 正在处理日期: {current_day}")
 
-            # 每天进行 2-3 笔对倒
-            trades_today = random.randint(2, 3)
-            last_price = Decimal('180.0000') 
+        # 更新全局日期
+        gs, _ = GlobalSimulationState.objects.get_or_create(id=1)
+        gs.current_global_date = current_day
+        gs.save()
 
-            for _ in range(trades_today):
-                # 随机分配买卖方
-                buyer_sim, seller_sim = (sim_a, sim_b) if random.random() > 0.5 else (sim_b, sim_a)
+        # --- A. 智能下单逻辑 ---
+        # 每天每个账户尝试下 8-12 个单
+        for active_sim in [sim_a, sim_b]:
+            num_orders = random.randint(8, 12)
+            
+            # 动态调整买卖倾向：回测前期多买入，后期有货了再随机卖出
+            day_index = (current_day - start_test_date).days
+            if day_index < 3:
+                sides_weights = ['BUY'] * 80 + ['SELL'] * 20  # 前三天 80% 概率买入
+            else:
+                sides_weights = ['BUY'] * 40 + ['SELL'] * 60  # 之后 60% 概率卖出
+
+            for _ in range(num_orders):
+                target_stock = random.choice(company_pool)
+                price_rec = DailyPrice.objects.filter(symbol=target_stock, trade_date=current_day).first()
+                if not price_rec: continue
                 
-                # 模拟股价波动
-                price = Decimal(random.uniform(180, 200)).quantize(Decimal('0.0001'))
-                last_price = price
-                qty = random.randint(5, 15) * 10 
-                total_amount = (qty * price).quantize(Decimal('0.0001'))
-
-                if buyer_sim.available_cash >= total_amount:
-                    # --- 1. 执行买方逻辑 ---
-                    buyer_sim.available_cash -= total_amount
-                    buyer_sim.save()
-                    
-                    h_buy, _ = Simulation_Holding.objects.get_or_create(
-                        sim=buyer_sim, 
-                        symbol=target_stock,
-                        defaults={'quantity': 0, 'avg_cost': Decimal('0.0000')}
-                    )
-                    
-                    old_cost_total = h_buy.avg_cost * h_buy.quantity
-                    h_buy.quantity += qty
-                    h_buy.avg_cost = ((old_cost_total + total_amount) / h_buy.quantity).quantize(Decimal('0.0001'))
-                    h_buy.save()
-                    
-                    # 匹配你的模型：字段是 type 和 total_amount
-                    Simulation_Transaction.objects.create(
-                        sim=buyer_sim, symbol=target_stock, 
-                        type='BUY', # 对应 TransType.BUY
-                        quantity=qty, price=price, total_amount=total_amount,
-                        trade_date=current_day
-                    )
-
-                    # --- 2. 执行卖方逻辑 ---
-                    seller_sim.available_cash += total_amount
-                    seller_sim.save()
-                    
-                    h_sell, _ = Simulation_Holding.objects.get_or_create(
-                        sim=seller_sim, 
-                        symbol=target_stock,
-                        defaults={'quantity': 0, 'avg_cost': Decimal('0.0000')}
-                    )
-                    h_sell.quantity -= qty # 允许负持仓作为初始测试
-                    h_sell.save()
-                    
-                    Simulation_Transaction.objects.create(
-                        sim=seller_sim, symbol=target_stock, 
-                        type='SELL', # 对应 TransType.SELL
-                        quantity=qty, price=price, total_amount=total_amount,
-                        trade_date=current_day
-                    )
-                    
-                    print(f"  ✅ {current_day}: {buyer_sim.user.username} 买入 {qty}股 NVDA @ {price}")
-
-            # 每日收盘记录 NAV
-            for s in [sim_a, sim_b]:
-                # 根据持仓计算市值
-                holding = Simulation_Holding.objects.filter(sim=s, symbol=target_stock).first()
-                q = holding.quantity if holding else 0
-                mkt_val = (q * last_price).quantize(Decimal('0.0001'))
-                daily_nav = s.available_cash + mkt_val
+                side = random.choice(sides_weights)
+                # 随机价格（基于当日波动）
+                price = Decimal(random.uniform(float(price_rec.low_price), float(price_rec.high_price))).quantize(Decimal('0.0001'))
+                qty = random.randint(1, 10) * 10 # 10-100股
                 
-                Simulation_NAV_History.objects.update_or_create(
-                    sim=s, record_date=current_day,
-                    defaults={
-                        'nav': daily_nav,
-                        'cash': s.available_cash,
-                        'market_value': mkt_val
-                    }
-                )
+                total_cost = (price * qty * Decimal('1.0003')).quantize(Decimal('0.0001'))
+
+                with transaction.atomic():
+                    # 重新锁定账户，防止并发计算
+                    s_lock = Simulation.objects.select_for_update().get(id=active_sim.id)
+                    can_place = False
+                    avg_cost_val = Decimal('0.0000')
+
+                    if side == 'BUY':
+                        if s_lock.available_cash >= total_cost:
+                            s_lock.available_cash -= total_cost
+                            s_lock.save()
+                            can_place = True
+                    else:
+                        # 卖出：必须真的有货
+                        h = Simulation_Holding.objects.filter(sim=s_lock, symbol=target_stock).select_for_update().first()
+                        if h and h.quantity >= qty:
+                            avg_cost_val = h.avg_cost # 获取买入成本，用于计算盈亏
+                            h.quantity -= qty
+                            if h.quantity == 0: h.delete()
+                            else: h.save()
+                            can_place = True
+                    
+                    if can_place:
+                        TradeOrder.objects.create(
+                            user=s_lock.user, sim=s_lock, symbol=target_stock,
+                            side=side, price=price, quantity=qty,
+                            status='PENDING', order_date=current_day,
+                            avg_cost_snapshot=avg_cost_val # 关键：存储成本快照
+                        )
+
+        # --- B. 运行撮合引擎 ---
+        # 这一步会根据 TradeOrder 生成 Simulation_Transaction
+        matches = internal_matching_engine(current_day)
+        print(f"   🤖 撮合完成: {matches} 笔交易")
+
+        # --- C. 每日净值结算 ---
+        for s in [sim_a, sim_b]:
+            nav, mkt_val = calculate_nav_optimized(s, current_day)
+            Simulation_NAV_History.objects.update_or_create(
+                sim=s, record_date=current_day,
+                defaults={'nav': nav, 'cash': s.available_cash, 'market_value': mkt_val}
+            )
 
         current_day += timedelta(days=1)
 
-    print(f"\n✨ 模拟完成！数据已同步至 3 月 12 日。")
-    print("现在去网页端查看‘交易流水’和‘资产曲线’，字段已经完全对齐了！")
+    print(f"\n✨ 回测数据填充完成。请查看前端『操作日志』，现在应该有实现盈亏了。")
 
 if __name__ == "__main__":
-    run_multi_user_simulation()
+    run_engine_simulation()

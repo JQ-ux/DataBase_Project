@@ -12,7 +12,8 @@ import json
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from .models import *
-
+from django.db.models import  OuterRef, Subquery, DecimalField
+from django.db import transaction
 # ==========================================
 # GLOBAL SETTINGS & PRECISION CONSTANTS
 # ==========================================
@@ -38,80 +39,81 @@ def get_market_price(symbol_obj, target_date):
     try:
         price_record = DailyPrice.objects.filter(
             symbol=symbol_obj,
-            trade_date__lte=target_date
+            trade_date__lt=target_date
         ).latest('trade_date')
         return price_record
     except DailyPrice.DoesNotExist:
         return None
 
+
 def calculate_nav_optimized(sim, target_date):
     """
-    Optimized for MySQL: Calculates NAV considering P2P frozen assets.
-    Formula: Available Cash + Frozen Cash (Remaining Buys) + Market Value (Live + Remaining Frozen Shares)
+    Production-grade NAV calculation optimized for RDBMS.
+    Formula: Available Cash + Frozen Buying Cash + Current Market Value
+    
+    This implementation replaces Python loops with Database Aggregations.
     """
-    from django.db.models import Q
-
-    # 1. Calculate Frozen Cash from PENDING and PARTIAL BUY orders
-    # We only count the UNFILLED portion (quantity - filled_quantity)
-    active_buys = TradeOrder.objects.filter(
-        sim=sim, 
-        status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL], 
-        side='BUY'
-    )
     
-    frozen_cash = Decimal('0.00')
-    for order in active_buys:
-        remaining_qty = order.quantity - order.filled_quantity
-        if remaining_qty > 0:
-            subtotal = order.price * remaining_qty
-            fee = quantize_4(subtotal * COMMISSION_RATE)
-            frozen_cash += (subtotal + fee)
+    # --- 1. Subquery: Get the latest close price for each symbol before target_date ---
+    # This prevents loading thousands of historical price rows into memory.
+    latest_price_subquery = DailyPrice.objects.filter(
+        symbol=OuterRef('symbol'),
+        trade_date__lt=target_date
+    ).order_by('-trade_date').values('close_price')[:1]
 
-    # 2. Get active holdings and PENDING/PARTIAL SELL orders
-    holdings = sim.holdings.exclude(quantity=0).select_related('symbol')
-    active_sells = TradeOrder.objects.filter(
+    # --- 2. Calculate Frozen Cash (Unfilled Buy Orders) ---
+    # Summing (price * remaining_qty) directly in the database.
+    # We ignore COMMISSION_RATE here for simplicity, or add it if strictly required.
+    frozen_data = TradeOrder.objects.filter(
         sim=sim,
-        status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
-        side='SELL'
-    ).select_related('symbol')
+        side='BUY',
+        status__in=['PENDING', 'PARTIAL']
+    ).aggregate(
+        total_frozen=Sum(
+            F('price') * (F('quantity') - F('filled_quantity')),
+            output_field=DecimalField()
+        )
+    )
+    frozen_cash = frozen_data['total_frozen'] or Decimal('0.0000')
 
-    # 3. Bulk fetch all relevant prices
-    symbol_ids = list(holdings.values_list('symbol_id', flat=True))
-    sell_symbol_ids = list(active_sells.values_list('symbol_id', flat=True))
-    all_symbol_ids = list(set(symbol_ids + sell_symbol_ids))
+    # --- 3. Calculate Market Value (Existing Holdings) ---
+    # Annotate each holding with the latest price from subquery, then aggregate.
+    holding_data = sim.holdings.exclude(quantity=0).annotate(
+        latest_price=Subquery(latest_price_subquery, output_field=DecimalField())
+    ).aggregate(
+        total_mkt_val=Sum(
+            F('quantity') * F('latest_price'),
+            output_field=DecimalField()
+        )
+    )
+    holdings_market_value = holding_data['total_mkt_val'] or Decimal('0.0000')
 
-    if not all_symbol_ids:
-        return sim.available_cash + frozen_cash, Decimal('0.00')
+    # --- 4. Calculate Market Value (Locked in Sell Orders) ---
+    # Shares locked in sell orders are still assets owned by the user.
+    sell_order_data = TradeOrder.objects.filter(
+        sim=sim,
+        side='SELL',
+        status__in=['PENDING', 'PARTIAL']
+    ).annotate(
+        latest_price=Subquery(latest_price_subquery, output_field=DecimalField())
+    ).aggregate(
+        frozen_mkt_val=Sum(
+            (F('quantity') - F('filled_quantity')) * F('latest_price'),
+            output_field=DecimalField()
+        )
+    )
+    frozen_shares_market_value = sell_order_data['frozen_mkt_val'] or Decimal('0.0000')
 
-    # Using target_date as filter boundary
-    price_qs = DailyPrice.objects.filter(
-        symbol_id__in=all_symbol_ids,
-        trade_date__lte=target_date
-    ).order_by('symbol_id', '-trade_date')
-
-    price_map = {}
-    for p in price_qs:
-        if p.symbol_id not in price_map:
-            price_map[p.symbol_id] = p.close_price
-
-    # 4. Aggregate total market value
-    total_market_value = Decimal('0.00')
-    
-    # Value of current portfolio (what's already in Simulation_Holding)
-    for hold in holdings:
-        exec_price = price_map.get(hold.symbol_id) or Decimal('0.00')
-        total_market_value += quantize_4(hold.quantity * exec_price)
-    
-    # Value of shares locked in pending/partial orders (The unexecuted part)
-    for sell_order in active_sells:
-        remaining_sell_qty = sell_order.quantity - sell_order.filled_quantity
-        if remaining_sell_qty > 0:
-            exec_price = price_map.get(sell_order.symbol_id) or Decimal('0.00')
-            total_market_value += quantize_4(remaining_sell_qty * exec_price)
-
-    # 5. Final Result
+    # --- 5. Final Aggregation ---
+    total_market_value = holdings_market_value + frozen_shares_market_value
     total_nav = sim.available_cash + frozen_cash + total_market_value
+
+    # Returns exactly what the frontend needs
     return total_nav, total_market_value
+
+# Helper to ensure 4 decimal places for financial calculations
+def quantize_4(val):
+    return val.quantize(Decimal('0.0001'))
 
 # ==========================================
 # 2. AUTHENTICATION & IDENTITY (ER: Stock_User)
@@ -207,6 +209,10 @@ def index(request):
     # 1. Fetch or Initialize Global Simulation State (The Master Clock)
     global_state = GlobalSimulationState.objects.first()
     if not global_state:
+        return HttpResponse("系统错误：请联系管理员初始化全局时钟。")
+    
+    virtual_today = global_state.current_global_date
+    if not global_state:
         # Emergency fallback if no state exists in DB
         initial_date = datetime.strptime("2026-03-02", "%Y-%m-%d").date()
         global_state = GlobalSimulationState.objects.create(
@@ -240,19 +246,32 @@ def index(request):
             market_value=Decimal('0.00')
         )
 
-    # 4. Market Explorer Logic: Fetch top companies with historical price matching
+    # 4. Market Explorer Logic: Fetch industries and filter companies
+    all_industries = Industry.objects.all()
+    selected_industry_id = request.GET.get('industry')
     query = request.GET.get('q', '').strip()
+
+    # Start with all companies
+    companies_qs = Company.objects.all()
+
+    # Apply Industry filter if selected
+    if selected_industry_id:
+        companies_qs = companies_qs.filter(industry_id=selected_industry_id)
+
+    # Apply Search query if exists
     if query:
-        popular_companies = Company.objects.filter(Q(symbol__icontains=query) | Q(full_name__icontains=query) )[:10]
-    else:
-        popular_companies = Company.objects.all()[:10]
+        companies_qs = companies_qs.filter(
+            Q(symbol__icontains=query) | Q(full_name__icontains=query)
+        )
+
+    # Slice to top 10 and process prices based on virtual timeline
+    popular_companies = companies_qs[:10]
     processed_stocks = []
     
     for comp in popular_companies:
-        # Filters price based on the GLOBAL virtual today
         price_rec = DailyPrice.objects.filter(
             symbol=comp,
-            trade_date__lte=virtual_today
+            trade_date__lt=virtual_today
         ).order_by('-trade_date').first()
         
         if price_rec:
@@ -261,7 +280,6 @@ def index(request):
                 "name": comp.full_name,
                 "price": price_rec.close_price,
             })
-
     # 5. Portfolio Accounting: Calculate NAV and Current Holdings
     # This now uses the global virtual_today for consistent valuation
     total_nav, total_mkt_val = calculate_nav_optimized(active_sim, virtual_today)
@@ -283,21 +301,26 @@ def index(request):
         })
 
     # 6. Data Visualization: Prepare labels and datasets for Chart.js
-    nav_history_qs = Simulation_NAV_History.objects.filter(sim=active_sim,record_date__gte="2026-02-12").order_by('record_date')
+    nav_history_qs = Simulation_NAV_History.objects.filter(sim=active_sim,record_date__gte="2026-02-12",record_date__lte=virtual_today).order_by('record_date')
     chart_labels = [record.record_date.strftime("%m-%d") for record in nav_history_qs]
     chart_data = [float(record.nav) for record in nav_history_qs]
+    recent_transactions = Simulation_Transaction.objects.filter(sim=active_sim).order_by('-trade_date', '-created_at')[:5]
+
 
     # 7. Render Response with full context
     context = {
         "sim": active_sim,
         "holdings": processed_holdings,
         "popular_stocks": processed_stocks,
+        "industries": all_industries,               
+        "current_industry": selected_industry_id,
         "total_profit": total_nav - active_sim.initial_cash,
         "profit_rate": round(((total_nav - active_sim.initial_cash) / active_sim.initial_cash * 100), 2),
         "chart_labels_json": json.dumps(chart_labels),
         "chart_data_json": json.dumps(chart_data),
         "virtual_today": virtual_today, # Passed from global state
         "is_market_open": global_state.is_market_open,
+        "recent_transactions": recent_transactions,
     }
     
     return render(request, "stock/index.html", context)
@@ -337,7 +360,7 @@ def api_search(request):
         reference_date = global_state.current_global_date
     else:
         # Fallback to a safe date if global state isn't initialized
-        reference_date = datetime.strptime("2026-03-02", "%Y-%m-%d").date()
+        return JsonResponse({"error": "Global state missing"}, status=500)
 
     # 2. Find matching companies
     matches = Company.objects.filter(
@@ -347,7 +370,10 @@ def api_search(request):
     results = []
     for m in matches:
         # 3. Fetch historical price based on the GLOBAL reference date
-        price_rec = get_market_price(m, reference_date)
+        price_rec = DailyPrice.objects.filter(
+            symbol=m,
+            trade_date__lt=reference_date 
+        ).order_by('-trade_date').first()
         
         # If no price exists for this company at this point in time, skip it
         if not price_rec:
@@ -420,19 +446,39 @@ def process_transaction(request):
 
             company = Company.objects.get(symbol=symbol)
 
-            # 5. God's Price Boundary Validation
-            # Pre-check: Ensure the order price is within the daily high/low range
-            price_rec = DailyPrice.objects.filter(symbol=company, trade_date=virtual_today).first()
-            if price_rec:
-                if side == "BUY" and order_price < price_rec.low_price:
-                    return JsonResponse({"success": False, "error": f"Buy price too low (Min: {price_rec.low_price})"})
-                if side == "SELL" and order_price > price_rec.high_price:
-                    return JsonResponse({"success": False, "error": f"Sell price too high (Max: {price_rec.high_price})"})
+            # 5. God's Price Boundary Validation (Refined for P2P Visibility)
+            # Use TODAY'S real market boundaries to ensure the order is physically possible.
+            today_price_rec = DailyPrice.objects.filter(
+                symbol=company, 
+                trade_date=virtual_today  # Use the actual simulation date
+            ).first()
+            
+            if today_price_rec:
+                # If buying, the order price must be at least the day's LOW to have any chance of filling.
+                if side == "BUY" and order_price < today_price_rec.low_price:
+                    return JsonResponse({
+                        "success": False, 
+                        "error": f"Order price {order_price} is below today's market low ({today_price_rec.low_price}). Adjust your bid."
+                    })
+                
+                # If selling, the order price must be at most the day's HIGH to have any chance of filling.
+                if side == "SELL" and order_price > today_price_rec.high_price:
+                    return JsonResponse({
+                        "success": False, 
+                        "error": f"Order price {order_price} is above today's market high ({today_price_rec.high_price}). Adjust your ask."
+                    })
+            else:
+                # Fallback: If no price record exists for today yet, block to prevent blind trading.
+                return JsonResponse({
+                    "success": False, 
+                    "error": "Market data for today is not yet synchronized. Please try again later."
+                })
             
             # 6. Asset Freezing (Deduction)
             subtotal = order_price * qty
             estimated_fee = quantize_4(subtotal * COMMISSION_RATE)
-            
+            avg_cost_at_order = ZERO
+
             if side == "BUY":
                 total_required = subtotal + estimated_fee
                 if sim.available_cash < total_required:
@@ -446,7 +492,8 @@ def process_transaction(request):
                 holding = Simulation_Holding.objects.filter(sim=sim, symbol=company).first()
                 if not holding or holding.quantity < qty:
                     return JsonResponse({"success": False, "error": "Insufficient shares."})
-                
+                avg_cost_at_order = holding.avg_cost
+
                 # Deduct shares immediately
                 holding.quantity -= qty
                 if holding.quantity == 0:
@@ -464,7 +511,8 @@ def process_transaction(request):
                 quantity=qty,
                 filled_quantity=0,
                 status=TradeOrder.OrderStatus.PENDING,
-                order_date=virtual_today
+                order_date=virtual_today,
+                avg_cost_snapshot=avg_cost_at_order if side == "SELL" else ZERO
             )
 
             # 8. Log Cash Flow (For Buyer Only)
@@ -583,14 +631,22 @@ def internal_matching_engine(execution_date):
         if not price_rec:
             continue 
 
-        # 3. Build the Order Book for this symbol (within God's boundaries)
-        # Buy Side: Higher price first (Price Priority). Must be >= market low to be valid.
+        # 3. Build the Order Book for this symbol (Strictly within God's boundaries)
+        # Buy Side: Price Priority. Order price must be at least the market LOW to be fillable today.
         buy_orders = TradeOrder.objects.filter(
             symbol_id=symbol_id,
             side=TradeOrder.OrderSide.BUY,
             status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
-            price__gte=price_rec.low_price
+            price__gte=price_rec.low_price  # Must hit today's low to exist in the pool
         ).order_by('-price', 'created_at')
+
+        # Sell Side: Price Priority. Order price must be at most the market HIGH to be fillable today.
+        sell_orders = TradeOrder.objects.filter(
+            symbol_id=symbol_id,
+            side=TradeOrder.OrderSide.SELL,
+            status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
+            price__lte=price_rec.high_price  # Must hit today's high to exist in the pool
+        ).order_by('price', 'created_at')
 
         # Sell Side: Lower price first (Price Priority). Must be <= market high to be valid.
         sell_orders = TradeOrder.objects.filter(
@@ -629,84 +685,124 @@ def internal_matching_engine(execution_date):
                         
                         # Re-check buyer after a match
                         if b_order.filled_quantity + match_qty >= b_order.quantity:
+        
                             break
+        # 6. P2M (User-to-Market) Matching Logic
+        # After P2P loop, any remaining quantity in valid orders is filled by the "Market"
+        
+        # Check remaining Buy Orders
+        for b_order in buy_orders:
+            b_order.refresh_from_db()
+            rem_buy = b_order.quantity - b_order.filled_quantity
+            if rem_buy > 0:
+                # If the limit price is valid against today's range, fill with system
+                # Using order.price as the execution price per your requirement
+                execute_settlement(b_order, None, rem_buy, b_order.price, execution_date, price_rec)
+                match_count += 1
+
+        # Check remaining Sell Orders
+        for s_order in sell_orders:
+            s_order.refresh_from_db()
+            rem_sell = s_order.quantity - s_order.filled_quantity
+            if rem_sell > 0:
+                # If the limit price is valid against today's range, fill with system
+                execute_settlement(None, s_order, rem_sell, s_order.price, execution_date, price_rec)
+                match_count += 1
 
     return match_count
 
 def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
     """
-    Handles assets transfer between two specific users (P2P).
+    Handles assets transfer. Supports both P2P (b_order & s_order) 
+    and P2M (one of the orders is None).
     """
-    from django.db import transaction
-
     with transaction.atomic():
         subtotal = price * qty
-        # Using your global constants and quantization
+        
+        # Using global constants and quantization
         buy_fee = quantize_4(subtotal * COMMISSION_RATE)
         sell_fee = quantize_4(subtotal * COMMISSION_RATE)
 
-        # A. Update Buyer's Portfolio (Simulation_Holding)
-        b_holding, created = Simulation_Holding.objects.get_or_create(
-            sim=b_order.sim,
-            symbol=b_order.symbol,
-            defaults={'quantity': 0, 'avg_cost': ZERO}
-        )
-        total_cost = (b_holding.quantity * b_holding.avg_cost) + subtotal + buy_fee
-        b_holding.quantity += qty
-        b_holding.avg_cost = quantize_4(total_cost / b_holding.quantity)
-        b_holding.save()
+        # ==========================================
+        # A & C. Buyer Side Logic (Only if b_order exists)
+        # ==========================================
+        if b_order:
+            # A. Update Buyer's Portfolio (Simulation_Holding)
+            b_holding, created = Simulation_Holding.objects.get_or_create(
+                sim=b_order.sim,
+                symbol=b_order.symbol,
+                defaults={'quantity': 0, 'avg_cost': ZERO}
+            )
+            total_cost = (b_holding.quantity * b_holding.avg_cost) + subtotal + buy_fee
+            b_holding.quantity += qty
+            b_holding.avg_cost = quantize_4(total_cost / b_holding.quantity)
+            b_holding.save()
 
-        # B. Update Seller's Cash (Shares are assumed deducted upon order creation)
-        s_order.sim.available_cash += (subtotal - sell_fee)
-        s_order.sim.save()
+            # C. Buyer Refund Logic
+            # Frozen: (limit_price * qty) + fee. Actual: (exec_price * qty) + fee.
+            frozen_unit_price = b_order.price + quantize_4(b_order.price * COMMISSION_RATE)
+            actual_unit_price = price + quantize_4(price * COMMISSION_RATE)
+            refund = (frozen_unit_price - actual_unit_price) * qty
+            
+            if refund > 0:
+                b_order.sim.available_cash += refund
+                b_order.sim.save()
 
-        # C. Buyer Refund Logic
-        # Frozen: (limit_price * qty) + fee. Actual: (exec_price * qty) + fee.
-        frozen_unit_price = b_order.price + quantize_4(b_order.price * COMMISSION_RATE)
-        actual_unit_price = price + quantize_4(price * COMMISSION_RATE)
-        refund = (frozen_unit_price - actual_unit_price) * qty
-        
-        if refund > 0:
-            b_order.sim.available_cash += refund
-            b_order.sim.save()
+            # D1. Create Buyer Audit Trail
+            Simulation_Transaction.objects.create(
+                sim=b_order.sim,
+                symbol=b_order.symbol,
+                daily_price=price_rec,
+                trade_date=trade_date,
+                type='BUY',
+                quantity=qty,
+                price=price,
+                total_amount=subtotal + buy_fee,
+                matched_order=b_order,
+                opponent_order=s_order,  # Will be None if P2M
+                realized_pnl=ZERO
+            )
 
-        # D. Create Two-Sided Audit Trail (P2P Linked)
-        # Buyer side transaction
-        Simulation_Transaction.objects.create(
-            sim=b_order.sim,
-            symbol=b_order.symbol,
-            daily_price=price_rec,
-            trade_date=trade_date,
-            type='BUY',
-            quantity=qty,
-            price=price,
-            total_amount=subtotal + buy_fee,
-            matched_order=b_order,
-            opponent_order=s_order
-        )
+        # ==========================================
+        # B. Seller Side Logic (Only if s_order exists)
+        # ==========================================
+        if s_order:
+            # B. Update Seller's Cash
+            s_order.sim.available_cash += (subtotal - sell_fee)
+            s_order.sim.save()
 
-        # Seller side transaction
-        Simulation_Transaction.objects.create(
-            sim=s_order.sim,
-            symbol=s_order.symbol,
-            daily_price=price_rec,
-            trade_date=trade_date,
-            type='SELL',
-            quantity=qty,
-            price=price,
-            total_amount=subtotal - sell_fee,
-            matched_order=s_order,
-            opponent_order=b_order
-        )
+            cost_at_order_time = s_order.avg_cost_snapshot or ZERO
+            
+            # Realized PnL = (Current Execution Price - Original Cost) * Quantity - Fee
+            realized_pnl = (price - cost_at_order_time) * qty - sell_fee
+            print("DEBUG SELL >>>", price, cost_at_order_time, qty, realized_pnl)
 
+            # D2. Create Seller Audit Trail
+            Simulation_Transaction.objects.create(
+                sim=s_order.sim,
+                symbol=s_order.symbol,
+                daily_price=price_rec,
+                trade_date=trade_date,
+                type='SELL',
+                quantity=qty,
+                price=price,
+                total_amount=subtotal - sell_fee,
+                matched_order=s_order,
+                opponent_order=b_order,  # Will be None if P2M
+                realized_pnl=realized_pnl
+            )
+
+        # ==========================================
         # E. Update Orders Status (Support Partial Fills)
+        # ==========================================
         for order in [b_order, s_order]:
-            order.filled_quantity += qty
-            if order.filled_quantity >= order.quantity:
-                order.status = TradeOrder.OrderStatus.FILLED
-            else:
-                order.status = TradeOrder.OrderStatus.PARTIAL
-            order.save()
+            if order: # Skip if the order is None (Market side in P2M)
+                order.filled_quantity += qty
+                if order.filled_quantity >= order.quantity:
+                    order.status = TradeOrder.OrderStatus.FILLED
+                else:
+                    order.status = TradeOrder.OrderStatus.PARTIAL
+                order.save()
 
 @login_required
 def advance_simulation_date(request, sim_id=None):
@@ -875,37 +971,83 @@ def stock_detail(request, symbol):
     
     # 4. Fetch price history: ONLY records on or before the GLOBAL virtual today
     # Prevents data leaks in the historical table and charts.
-    price_history = DailyPrice.objects.filter(
+   
+    
+    price_history_qs = DailyPrice.objects.filter(
         symbol=company,
         trade_date__lte=reference_date
     ).order_by('-trade_date')[:30]
-    price_history = list(price_history)[::-1]
-    # 5. Fetch financial reports: Also filtered by the global virtual date
+    price_history = list(price_history_qs)[::-1]
+
+    
+    yesterday_price_rec = DailyPrice.objects.filter(
+        symbol=company,
+        trade_date__lt=reference_date  
+    ).order_by('-trade_date').first()
+
+    
+    if yesterday_price_rec:
+        current_sim_price = yesterday_price_rec.close_price
+    elif price_history:
+        current_sim_price = price_history[-1].close_price
+    else:
+        current_sim_price = company.current_price
+    # -----------------------
+    # 5. Fetch financial reports
     financial_reports = Financials.objects.filter(
         symbol=company,
         report_date__lte=reference_date
     ).order_by('-report_date')
+
+
+    # We sort by date ascending for the chart (left to right)
+    chart_qs = financial_reports.order_by('report_date')
     
-    # 6. Check if the user currently holds this stock
+    # Extract dates and ratios into lists
+    report_dates = [f.report_date.strftime('%Y-%m') for f in chart_qs]
+    debt_ratios = [float(f.debt_asset_ratio) for f in chart_qs]
+    current_ratios = [float(f.current_ratio) for f in chart_qs]
+    quick_ratios = [float(f.quick_ratio) for f in chart_qs]
+
+    # Serialize to JSON strings for the template's JavaScript
+    chart_dates_json = json.dumps(report_dates)
+    debt_ratios_json = json.dumps(debt_ratios)
+    current_ratios_json = json.dumps(current_ratios)
+    quick_ratios_json = json.dumps(quick_ratios)
+   
+
+    # 6. (Optional New Feature) Fetch Pending Orders for this stock
+    # This allows users to see the current "Market Depth"
+    pending_orders = TradeOrder.objects.filter(
+        symbol=company,
+        status='PENDING'
+    ).order_by('-price') # Show highest buy/sell prices
+    yesterday_rec = DailyPrice.objects.filter(
+        symbol=company,
+        trade_date__lt=reference_date
+    ).order_by('-trade_date').first()
+
+    if yesterday_rec:
+        current_sim_price = yesterday_rec.close_price
+    elif price_history:
+
+        current_sim_price = price_history[0].close_price
+    else:
+
+        current_sim_price = company.current_price
+
+
+    print(f"DEBUG >>> GlobalDate: {reference_date} | FinalPrice: {current_sim_price}")
+    # Check if the user currently holds this stock
     user_holding = None
     if active_sim:
         user_holding = Simulation_Holding.objects.filter(
             sim=active_sim, 
             symbol=company
         ).first()
-
-    # 7. (Optional New Feature) Fetch Pending Orders for this stock
-    # This allows users to see the current "Market Depth"
-    pending_orders = TradeOrder.objects.filter(
-        symbol=company,
-        status='PENDING'
-    ).order_by('-price') # Show highest buy/sell prices
-    current_sim_price = price_history[-1].close_price if price_history else company.current_price
-
-
     return render(request, "stock/detail.html", {
         "company": company,
-        "current_price": current_sim_price,  # 【新增】传给前端的“活”价格
+        "current_price": current_sim_price, 
         "financials": financial_reports,
         "history": price_history,
         "holding": user_holding,
@@ -913,6 +1055,10 @@ def stock_detail(request, symbol):
         "virtual_today": reference_date,
         "is_market_open": is_market_open,
         "pending_orders": pending_orders,
+        "chart_dates_json": chart_dates_json,
+        "debt_ratios_json": debt_ratios_json,
+        "current_ratios_json": current_ratios_json,
+        "quick_ratios_json": quick_ratios_json,
     })
 
 @login_required
@@ -974,11 +1120,14 @@ def portfolio_view(request):
         # 2. Iterate through holdings to calculate values (This loop remains exactly as you wrote it)
         for h in raw_holdings:
             price_rec = get_market_price(h.symbol, virtual_today)
-            hist_price = price_rec.close_price if price_rec else h.symbol.current_price
+            hist_price = price_rec.close_price if price_rec else Decimal('0.0000')
             
             mkt_val = h.quantity * hist_price
             pnl = (hist_price - h.avg_cost) * h.quantity
-            pnl_percent = ((hist_price - h.avg_cost) / h.avg_cost * 100) if h.avg_cost > 0 else 0
+            if h.avg_cost != 0:
+                pnl_percent = ((hist_price - h.avg_cost) / abs(h.avg_cost) * 100)
+            else:
+                pnl_percent = 0
             
             total_stock_value += mkt_val
             
