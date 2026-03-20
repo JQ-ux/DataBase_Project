@@ -412,15 +412,17 @@ def api_search_companies(request):
         return JsonResponse({'results': []})
     
     
+    # Use select_related to join Industry table and reduce DB hits
     companies = Company.objects.filter(
         Q(symbol__icontains=query) | Q(full_name__icontains=query)
-    )[:5]
+    ).select_related('industry')[:6]
     
     results = []
     for c in companies:
         results.append({
             'symbol': c.symbol,
             'full_name': c.full_name,
+            'industry': c.industry.name if c.industry else "N/A",
         })
     
     return JsonResponse({'results': results})

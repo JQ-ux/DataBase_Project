@@ -232,7 +232,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+{{ block.super }}<script>
     document.addEventListener('DOMContentLoaded', function() {
         const ctx = document.getElementById('performanceChart').getContext('2d');
         const labels = {{ chart_labels_json|safe }};
