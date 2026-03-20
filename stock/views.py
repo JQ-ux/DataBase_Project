@@ -14,6 +14,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from .models import *
 from django.db.models import  OuterRef, Subquery, DecimalField
 from django.db import transaction
+from django.db.models import DecimalField, FloatField, IntegerField
+import ast
+import operator
 # ==========================================
 # GLOBAL SETTINGS & PRECISION CONSTANTS
 # ==========================================
@@ -23,6 +26,83 @@ INITIAL_BALANCE = Decimal('100000.00')
 PRECISION_4 = Decimal('0.0001')
 PRECISION_2 = Decimal('0.01')
 COMMISSION_RATE = Decimal('0.0003') # 0.03% Transaction Fee
+
+def safe_eval_formula(formula_str, context):
+    """
+    Safely evaluates a mathematical formula string using Abstract Syntax Trees (AST).
+    
+    Args:
+        formula_str (str): The raw string from the user (e.g., "net_income / total_revenue").
+        context (dict): A dictionary mapping variable names to their numeric values 
+                       (e.g., {'net_income': 100, 'total_revenue': 500}).
+    
+    Returns:
+        Decimal: The result of the calculation.
+    
+    Raises:
+        Exception: If the formula contains illegal operations or undefined variables.
+    """
+    # Define allowed operators for calculation
+    # This acts as a whitelist to prevent execution of malicious code
+    allowed_operators = {
+        ast.Add: operator.add, 
+        ast.Sub: operator.sub, 
+        ast.Mult: operator.mul, 
+        ast.Div: operator.truediv,
+        ast.USub: operator.neg  # Supports negative numbers like -5
+    }
+
+    def eval_node(node):
+        # Case 1: The node is a literal number (e.g., 100 or 0.05)
+        if isinstance(node, ast.Num):
+            return Decimal(str(node.n))
+        
+        # Case 2: The node is a binary operation (e.g., a + b, a / b)
+        elif isinstance(node, ast.BinOp):
+            left_val = eval_node(node.left)
+            right_val = eval_node(node.right)
+            op_type = type(node.op)
+            
+            if op_type in allowed_operators:
+                # Case 2.1: Robust Division handling
+                if op_type == ast.Div:
+                    # Use a small epsilon to prevent division by zero or near-zero values
+                    # This avoids extreme spikes in the chart caused by tiny denominators
+                    if abs(right_val) < Decimal('0.000001'):
+                        return Decimal('0')
+                    return left_val / right_val
+                return allowed_operators[op_type](left_val, right_val)
+            raise ValueError(f"Operator {op_type.__name__} is not allowed.")
+            
+        # Case 3: The node is a unary operation (e.g., -income)
+        elif isinstance(node, ast.UnaryOp):
+            operand_val = eval_node(node.operand)
+            op_type = type(node.op)
+            if op_type in allowed_operators:
+                return allowed_operators[op_type](operand_val)
+            raise ValueError(f"Unary operator {op_type.__name__} is not allowed.")
+
+        # Case 4: The node is a variable name (e.g., total_revenue)
+        elif isinstance(node, ast.Name):
+            # Fetch the value from the provided financial context
+            val = context.get(node.id)
+            if val is None:
+                raise NameError(f"Variable '{node.id}' is not found in financial data.")
+            return Decimal(str(val))
+        
+        else:
+            raise TypeError(f"Unsupported syntax: {type(node).__name__}")
+
+    try:
+        # Clean the string and parse it into an expression tree
+        # mode='eval' ensures we only process a single expression, not a script
+        cleaned_formula = formula_str.replace(" ", "")
+        tree = ast.parse(cleaned_formula, mode='eval')
+        return eval_node(tree.body)
+    except Exception as e:
+        # Catch and re-raise with a clear message for the frontend
+        raise Exception(f"Formula Error: {str(e)}")
+    
 
 def quantize_4(value):
     return Decimal(value).quantize(PRECISION_4, rounding=ROUND_HALF_UP)
@@ -1045,6 +1125,20 @@ def stock_detail(request, symbol):
             sim=active_sim, 
             symbol=company
         ).first()
+
+    # -----------------------
+    # 7. Dynamic Formula Support
+    # Extract all numeric field names from the Financials model
+    # This allows the frontend to show which variables are available for custom formulas
+    all_financial_fields = [
+        f.name for f in Financials._meta.get_fields() 
+        if isinstance(f, (DecimalField, FloatField, IntegerField))
+    ]
+    
+    # Define fields to exclude from calculation variables
+    excluded_fields = ['id', 'symbol_id']
+    calculable_fields = [f for f in all_financial_fields if f not in excluded_fields]
+
     return render(request, "stock/detail.html", {
         "company": company,
         "current_price": current_sim_price, 
@@ -1059,6 +1153,7 @@ def stock_detail(request, symbol):
         "debt_ratios_json": debt_ratios_json,
         "current_ratios_json": current_ratios_json,
         "quick_ratios_json": quick_ratios_json,
+        "calculable_fields": calculable_fields,
     })
 
 @login_required
@@ -1219,3 +1314,74 @@ def custom_500(request):
     Handle Internal Server Errors (e.g., database lock timeout)
     """
     return render(request, "errors/500.html", status=500)
+
+@login_required
+def api_calculate_custom_indicator(request):
+    """
+    API endpoint that calculates custom financial indicators based on user formulas.
+    Returns JSON data suitable for Chart.js rendering.
+    """
+    # 1. Extract parameters from the AJAX request
+    symbol = request.GET.get('symbol')
+    formula = request.GET.get('formula', '').strip()
+    
+    if not symbol or not formula:
+        return JsonResponse({"success": False, "error": "Please provide both a stock symbol and a formula."})
+
+    try:
+        # 2. Identify the company and simulation context
+        company = Company.objects.get(symbol=symbol)
+        active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
+        
+        # Use simulation date to prevent data leaking from the "future"
+        reference_date = active_sim.current_virtual_date if active_sim else timezone.now().date()
+
+        # 3. Fetch historical financial records up to the simulation date
+        # Ordered by date ascending for proper chart timeline (Left -> Right)
+        financial_records = Financials.objects.filter(
+            symbol=company,
+            report_date__lte=reference_date
+        ).order_by('report_date')
+
+        if not financial_records.exists():
+            return JsonResponse({"success": False, "error": "No historical financial data found for this stock."})
+
+        chart_labels = []
+        chart_values = []
+
+        # 4. Iterate through each report and calculate the result using our safe engine
+        for report in financial_records:
+            context = {}
+            # Automatically pull all numeric fields from DB
+            for field in report._meta.fields:
+                if isinstance(field, (models.DecimalField, models.FloatField, models.IntegerField, models.BigIntegerField)):
+                    value = getattr(report, field.name)
+                    context[field.name] = Decimal(str(value)) if value is not None else Decimal('0')
+
+            # --- INSERT THIS PART START ---
+            # 4.1 Inject derived financial variables not present in physical DB columns
+            assets = context.get('total_assets', Decimal('0'))
+            liabilities = context.get('total_liabilities', Decimal('0'))
+            
+            # Define total_equity so users can use it in formulas
+            context['total_equity'] = assets - liabilities
+            # --- INSERT THIS PART END ---
+
+            # Calculate the result for this period
+            result = safe_eval_formula(formula, context)
+            
+            chart_labels.append(report.report_date.strftime('%Y-%m'))
+            chart_values.append(float(result))
+
+        return JsonResponse({
+            "success": True,
+            "labels": chart_labels,
+            "values": chart_values,
+            "formula_used": formula
+        })
+
+    except Company.DoesNotExist:
+        return JsonResponse({"success": False, "error": "Company not found."})
+    except Exception as e:
+        # Return the specific error message (e.g., "Variable not found" or "Syntax Error")
+        return JsonResponse({"success": False, "error": str(e)})

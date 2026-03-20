@@ -1,4 +1,4 @@
-{% extends "stock/base.html" %}
+ {% extends "stock/base.html" %}
 
 {% block body %}
 <style>
@@ -129,10 +129,16 @@
             <div class="card shadow-sm border-0 mb-4">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-pie-chart text-warning me-2"></i>财务比率趋势</h5>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-primary active" id="btn-debt" onclick="updateRatioChart('debt')">资产负债率</button>
-                        <button type="button" class="btn btn-outline-primary" id="btn-current" onclick="updateRatioChart('current')">流动比率</button>
-                        <button type="button" class="btn btn-outline-primary" id="btn-quick" onclick="updateRatioChart('quick')">速动比率</button>
+                    <div class="d-flex align-items-center">
+                        <div class="input-group input-group-sm" style="width: 350px;">
+                            <span class="input-group-text bg-light text-muted x-small">f(x)=</span>
+                            <input type="text" id="custom-formula-input" class="form-control" 
+                                   placeholder="e.g. net_income / total_revenue" 
+                                   value="net_income / total_assets">
+                            <button class="btn btn-primary" type="button" id="btn-calculate-formula">
+                                <i class="bi bi-play-fill"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body">
@@ -216,7 +222,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-    // 1. 原有的快速填充功能
+    // 1. filling
     function quickFill(price) {
         const priceInput = document.getElementById('inputPrice');
         if (priceInput) {
@@ -226,60 +232,75 @@
         }
     }
 
-    // 2. 财务比率图表逻辑
+    // 2. Dynamic Financial Indicator Logic
     const chartLabels = {{ chart_dates_json|safe }};
-    const datasetConfigs = {
-        'debt': {
-            label: '资产负债率 (%)',
-            data: {{ debt_ratios_json|safe }},
-            borderColor: '#e74c3c',
-            backgroundColor: 'rgba(231, 76, 60, 0.1)',
-            fill: true,
-            tension: 0.3
-        },
-        'current': {
-            label: '流动比率',
-            data: {{ current_ratios_json|safe }},
-            borderColor: '#3498db',
-            backgroundColor: 'rgba(52, 152, 219, 0.1)',
-            fill: true,
-            tension: 0.3
-        },
-        'quick': {
-            label: '速动比率',
-            data: {{ quick_ratios_json|safe }},
-            borderColor: '#2ecc71',
-            backgroundColor: 'rgba(46, 204, 113, 0.1)',
-            fill: true,
-            tension: 0.3
-        }
-    };
-
     const ctx = document.getElementById('ratioChart').getContext('2d');
+    
+    // Initialize chart with empty data
     let ratioChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: chartLabels,
-            datasets: [datasetConfigs['debt']]
+            datasets: []
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'top' } },
+            plugins: { 
+                legend: { position: 'top' } 
+            },
             scales: {
-                y: { beginAtZero: false, grid: { color: '#f0f0f0' } },
-                x: { grid: { display: false } }
+                y: { 
+                    beginAtZero: false, 
+                    grid: { color: '#f0f0f0' } 
+                },
+                x: { 
+                    grid: { display: false } 
+                }
             }
         }
     });
 
-    function updateRatioChart(type) {
-        ratioChart.data.datasets = [datasetConfigs[type]];
-        ratioChart.update();
-        ['debt', 'current', 'quick'].forEach(t => {
-            const btn = document.getElementById('btn-' + t);
-            t === type ? btn.classList.add('active') : btn.classList.remove('active');
-        });
-    }
+    // Handle formula calculation via AJAX
+    document.getElementById('btn-calculate-formula').addEventListener('click', function() {
+        const formulaInput = document.getElementById('custom-formula-input');
+        const formula = formulaInput.value;
+        const symbol = "{{ company.symbol }}";
+        const btn = this;
+        const originalHtml = btn.innerHTML;
+
+        // UI feedback: Disable button and show spinner
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        // Call the indicator API defined in urls.py
+        fetch(`/api/v1/indicators/calculate/?symbol=${symbol}&formula=${encodeURIComponent(formula)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert("Calculation Error: " + data.error);
+                } else {
+                    // Update chart with new data from server
+                    ratioChart.data.datasets = [{
+                        label: formula,
+                        data: data.values,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }];
+                    ratioChart.update();
+                }
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                alert("Server connection failed.");
+            })
+            .finally(() => {
+                // Restore button state
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            });
+    });
 </script>
 {% endblock %}
