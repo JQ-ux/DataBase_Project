@@ -156,6 +156,49 @@ class Simulation(models.Model):
     mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.LIVE)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def save(self, *args, **kwargs):
+        """
+        Overrides the save method to automate ledger initialization.
+        Ensures that every new simulation starts with a verifiable 'INIT' cash flow.
+        """
+        # 1. Check if this is a new instance creation
+        is_new = self._state.adding 
+
+        if is_new:
+            # 2. Sync financial fields with initial_cash on creation
+            self.available_cash = self.initial_cash
+            self.current_nav = self.initial_cash
+
+        # 3. Save the Simulation instance first to get an ID
+        super().save(*args, **kwargs)
+
+        # 4. Automatically record the initial deposit in the Cash Flow ledger
+        if is_new:
+            # Local import to prevent circular dependency
+            from .models import Simulation_Cash_Flow
+            
+            Simulation_Cash_Flow.objects.create(
+                sim=self,
+                change_type=Simulation_Cash_Flow.FlowType.INIT,
+                before_balance=Decimal('0.0000'),
+                amount=self.initial_cash,
+                after_balance=self.initial_cash,
+                # Unique request_id for auditing purposes
+                request_id=f"AUTO_INIT_{self.id}_{int(timezone.now().timestamp())}"
+            )
+
+    @property
+    def total_fees(self):
+        """
+        Aggregates all recorded transaction fees from the cash flow ledger.
+        This helps reconcile the gap between Floating PnL and NAV.
+        """
+        from .models import Simulation_Cash_Flow
+        # Summing all negative amounts marked as 'FEE'
+        return self.cash_flows.filter(
+            change_type=Simulation_Cash_Flow.FlowType.FEE
+        ).aggregate(models.Sum('amount'))['amount__sum'] or Decimal('0.0000')
+
     @property
     def market_value(self):
 

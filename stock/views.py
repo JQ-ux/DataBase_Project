@@ -18,6 +18,7 @@ from django.db.models import DecimalField, FloatField, IntegerField
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import user_passes_test
 import ast
 import operator
 # ==========================================
@@ -886,7 +887,10 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                     order.status = TradeOrder.OrderStatus.PARTIAL
                 order.save()
 
-@login_required
+def is_superuser(user):
+    return user.is_authenticated and user.is_superuser
+
+@user_passes_test(is_superuser)
 def advance_simulation_date(request, sim_id=None):
     """
     Global System Clock Controller.
