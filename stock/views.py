@@ -15,6 +15,9 @@ from .models import *
 from django.db.models import  OuterRef, Subquery, DecimalField
 from django.db import transaction
 from django.db.models import DecimalField, FloatField, IntegerField
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
 import ast
 import operator
 # ==========================================
@@ -260,16 +263,46 @@ def register_view(request):
             return render(request, "stock/register.html", {"message": str(e)})
             
     return render(request, "stock/register.html")
+import traceback
+from django.http import HttpResponse
+
 
 def login_view(request):
-    if request.method == "POST":
-        u, p = request.POST.get("username"), request.POST.get("password")
-        user = authenticate(request, username=u, password=p)
-        if user:
-            login(request, user)
-            return HttpResponseRedirect(reverse("index"))
-        return render(request, "stock/login.html", {"message": "Access Denied."})
-    return render(request, "stock/login.html")
+    print("\n====== LOGIN DEBUG START ======")
+
+    try:
+        print("Method:", request.method)
+        print("POST:", dict(request.POST))
+        print("COOKIES:", request.COOKIES)
+
+        if request.method == "POST":
+            u = request.POST.get("username")
+            p = request.POST.get("password")
+
+            print("username:", u)
+            print("password:", p)
+
+            if not u or not p:
+                return HttpResponse("❌ username or password is None")
+
+            user = authenticate(request, username=u, password=p)
+
+            print("authenticate result:", user)
+
+            if user is not None:
+                login(request, user)
+                print("login success")
+                return HttpResponse("LOGIN SUCCESS")
+            else:
+                print("authenticate failed")
+                return HttpResponse("AUTH FAILED")
+
+        return render(request, "stock/login.html")
+
+    except Exception as e:
+        print("EXCEPTION:")
+        traceback.print_exc()
+        return HttpResponse(f"SERVER ERROR:\n{str(e)}")
 
 @login_required
 def logout_view(request):
@@ -406,6 +439,20 @@ def index(request):
     return render(request, "stock/index.html", context)
 
 
+@login_required
+def current_sim(request):
+    sim = Simulation.objects.filter(
+        user=request.user,
+        status='ACTIVE'
+    ).order_by('-created_at').first()
+
+    if not sim:
+        return JsonResponse({"error": "No active simulation"}, status=404)
+
+    return JsonResponse({
+        "sim_id": sim.id
+    })
+
 def api_search_companies(request):
     query = request.GET.get('q', '').strip()
     if len(query) < 1:
@@ -501,8 +548,26 @@ def process_transaction(request):
         order_price = Decimal(payload.get('price', '0.0000'))
         request_id = payload.get('request_id')
 
-        if not sim_id or side not in ['BUY', 'SELL'] or qty <= 0 or order_price <= 0:
-            return JsonResponse({"success": False, "error": "Invalid parameters or price."})
+        # --- REPLACED START: Enhanced parameter validation for debugging ---
+        error_fields = []
+        if not sim_id: error_fields.append("sim_id")
+        if side not in ['BUY', 'SELL']: error_fields.append(f"side (current: {side})")
+        if qty <= 0: error_fields.append(f"quantity (current: {qty})")
+        if order_price <= 0: error_fields.append(f"price (current: {order_price})")
+
+        if error_fields:
+            return JsonResponse({
+                "success": False, 
+                "error": f"Invalid parameters or price. Check fields: {', '.join(error_fields)}",
+                "debug_payload": {
+                    "sim_id": sim_id,
+                    "symbol": symbol,
+                    "qty": qty,
+                    "side": side,
+                    "price": str(order_price)
+                }
+            })
+        # --- REPLACED END ---
 
         with transaction.atomic():
             # 2. Check Global Market State
@@ -535,25 +600,15 @@ def process_transaction(request):
                 trade_date=virtual_today  # Use the actual simulation date
             ).first()
             
-            if today_price_rec:
-                # If buying, the order price must be at least the day's LOW to have any chance of filling.
-                if side == "BUY" and order_price < today_price_rec.low_price:
-                    return JsonResponse({
-                        "success": False, 
-                        "error": f"Order price {order_price} is below today's market low ({today_price_rec.low_price}). Adjust your bid."
-                    })
-                
-                # If selling, the order price must be at most the day's HIGH to have any chance of filling.
-                if side == "SELL" and order_price > today_price_rec.high_price:
-                    return JsonResponse({
-                        "success": False, 
-                        "error": f"Order price {order_price} is above today's market high ({today_price_rec.high_price}). Adjust your ask."
-                    })
-            else:
-                # Fallback: If no price record exists for today yet, block to prevent blind trading.
+            if not today_price_rec:
+                return JsonResponse({"success": False, "error": "MARKET_DATA_MISSING"})
+            
+            # Rejection logic: The price must be within [Low, High]
+            if not (today_price_rec.low_price <= order_price <= today_price_rec.high_price):
                 return JsonResponse({
                     "success": False, 
-                    "error": "Market data for today is not yet synchronized. Please try again later."
+                    "error": "UNTRADABLE_PRICE",
+                    "message": f"Price {order_price} out of range [{today_price_rec.low_price} - {today_price_rec.high_price}]"
                 })
             
             # 6. Asset Freezing (Deduction)
@@ -566,24 +621,38 @@ def process_transaction(request):
                 if sim.available_cash < total_required:
                     return JsonResponse({"success": False, "error": "Insufficient cash."})
                 
-                # Deduct cash immediately
                 sim.available_cash -= total_required
                 sim.save()
+
+                # Sync Holding: Update quantity and recalculate average cost
+                holding, created = Simulation_Holding.objects.get_or_create(
+                    sim=sim, symbol=company, 
+                    defaults={'quantity': 0, 'avg_cost': ZERO}
+                )
+                total_cost = (holding.quantity * holding.avg_cost) + subtotal
+                holding.quantity += qty
+                holding.avg_cost = (total_cost / holding.quantity).quantize(Decimal('0.0001'))
+                holding.save()
 
             elif side == "SELL":
                 holding = Simulation_Holding.objects.filter(sim=sim, symbol=company).first()
                 if not holding or holding.quantity < qty:
                     return JsonResponse({"success": False, "error": "Insufficient shares."})
+                
                 avg_cost_at_order = holding.avg_cost
+                
+                # Instant Liquidation: Add net proceeds to cash
+                net_proceeds = subtotal - estimated_fee
+                sim.available_cash += net_proceeds
+                sim.save()
 
-                # Deduct shares immediately
                 holding.quantity -= qty
                 if holding.quantity == 0:
                     holding.delete()
                 else:
                     holding.save()
 
-            # 7. Create the PENDING Order
+            # 7. Create the FILLED Order
             new_order = TradeOrder.objects.create(
                 user=request.user,
                 sim=sim,
@@ -591,8 +660,8 @@ def process_transaction(request):
                 side=side,
                 price=order_price,
                 quantity=qty,
-                filled_quantity=0,
-                status=TradeOrder.OrderStatus.PENDING,
+                filled_quantity=qty,
+                status=TradeOrder.OrderStatus.FILLED,
                 order_date=virtual_today,
                 avg_cost_snapshot=avg_cost_at_order if side == "SELL" else ZERO
             )
@@ -601,18 +670,33 @@ def process_transaction(request):
             if side == 'BUY':
                 Simulation_Cash_Flow.objects.create(
                     sim=sim,
-                    request_id=f"FREEZE_{new_order.id}",
-                    change_type='FEE',
+                    request_id=f"EXEC_{new_order.id}", # Change FREEZE to EXEC to reflect reality
+                    change_type='TRADE',               # FEE is too narrow, this was a full trade
                     before_balance=sim.available_cash + total_required,
                     amount=-total_required,
                     after_balance=sim.available_cash
                 )
 
+            # ---  9. Record Audit Trail for "Operation Logs" UI ---
+            # This ensures the trade appears in transactions_view immediately.
+            Simulation_Transaction.objects.create(
+                sim=sim,
+                symbol=company,
+                daily_price=today_price_rec, # Use the record found in Step 5
+                trade_date=virtual_today,
+                type=side,                   # 'BUY' or 'SELL'
+                quantity=qty,
+                price=order_price,
+                total_amount=subtotal + estimated_fee if side == 'BUY' else subtotal - estimated_fee,
+                matched_order=new_order,
+                realized_pnl=ZERO if side == 'BUY' else (order_price - avg_cost_at_order) * qty - estimated_fee
+            )
+
             return JsonResponse({
                 "success": True,
-                "message": f"Order for {symbol} placed.",
+                "message": f"Successfully executed {side} for {symbol}.",
                 "order_id": new_order.id,
-                "available_cash": str(sim.available_cash)
+                "status": "FILLED" # Let the frontend know it can update the portfolio immediately
             })
 
     except Company.DoesNotExist:
@@ -693,105 +777,21 @@ def cancel_order(request):
 
 def internal_matching_engine(execution_date):
     """
-    Core matching engine:
-    Processes peer-to-peer matching between users within market High/Low boundaries.
+    Simplified Engine: 
+    Since process_transaction handles instant execution, 
+    this now only serves as a safety cleanup for the day.
     """
-    # 1. Fetch all unique symbols that have pending or partially filled orders
-    active_symbols = TradeOrder.objects.filter(
-        status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL]
-    ).values_list('symbol', flat=True).distinct()
-
-    match_count = 0
-
-    for symbol_id in active_symbols:
-        # 2. God's boundary check: retrieve market performance for the execution date
-        price_rec = DailyPrice.objects.filter(
-            symbol_id=symbol_id, 
-            trade_date=execution_date
-        ).first()
-        
-        if not price_rec:
-            continue 
-
-        # 3. Build the Order Book for this symbol (Strictly within God's boundaries)
-        # Buy Side: Price Priority. Order price must be at least the market LOW to be fillable today.
-        buy_orders = TradeOrder.objects.filter(
-            symbol_id=symbol_id,
-            side=TradeOrder.OrderSide.BUY,
-            status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
-            price__gte=price_rec.low_price  # Must hit today's low to exist in the pool
-        ).order_by('-price', 'created_at')
-
-        # Sell Side: Price Priority. Order price must be at most the market HIGH to be fillable today.
-        sell_orders = TradeOrder.objects.filter(
-            symbol_id=symbol_id,
-            side=TradeOrder.OrderSide.SELL,
-            status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
-            price__lte=price_rec.high_price  # Must hit today's high to exist in the pool
-        ).order_by('price', 'created_at')
-
-        # Sell Side: Lower price first (Price Priority). Must be <= market high to be valid.
-        sell_orders = TradeOrder.objects.filter(
-            symbol_id=symbol_id,
-            side=TradeOrder.OrderSide.SELL,
-            status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
-            price__lte=price_rec.high_price
-        ).order_by('price', 'created_at')
-
-        # 4. Peer-to-Peer Matching Logic
-        for b_order in buy_orders:
-            # Refresh buyer status from DB to handle partial fills in the same loop
-            b_order.refresh_from_db()
-            if b_order.filled_quantity >= b_order.quantity:
-                continue
-
-            for s_order in sell_orders:
-                s_order.refresh_from_db()
-                if s_order.filled_quantity >= s_order.quantity:
-                    continue
-
-                # P2P Condition: Buyer's price covers Seller's ask
-                if b_order.price >= s_order.price:
-                    # Execution Price: Uses the price of the order that was placed first
-                    exec_price = s_order.price if s_order.created_at < b_order.created_at else b_order.price
-                    
-                    # Match Quantity: Min of remaining amounts
-                    rem_buy = b_order.quantity - b_order.filled_quantity
-                    rem_sell = s_order.quantity - s_order.filled_quantity
-                    match_qty = min(rem_buy, rem_sell)
-
-                    if match_qty > 0:
-                        # 5. Execute P2P Settlement
-                        execute_settlement(b_order, s_order, match_qty, exec_price, execution_date, price_rec)
-                        match_count += 1
-                        
-                        # Re-check buyer after a match
-                        if b_order.filled_quantity + match_qty >= b_order.quantity:
-        
-                            break
-        # 6. P2M (User-to-Market) Matching Logic
-        # After P2P loop, any remaining quantity in valid orders is filled by the "Market"
-        
-        # Check remaining Buy Orders
-        for b_order in buy_orders:
-            b_order.refresh_from_db()
-            rem_buy = b_order.quantity - b_order.filled_quantity
-            if rem_buy > 0:
-                # If the limit price is valid against today's range, fill with system
-                # Using order.price as the execution price per your requirement
-                execute_settlement(b_order, None, rem_buy, b_order.price, execution_date, price_rec)
-                match_count += 1
-
-        # Check remaining Sell Orders
-        for s_order in sell_orders:
-            s_order.refresh_from_db()
-            rem_sell = s_order.quantity - s_order.filled_quantity
-            if rem_sell > 0:
-                # If the limit price is valid against today's range, fill with system
-                execute_settlement(None, s_order, rem_sell, s_order.price, execution_date, price_rec)
-                match_count += 1
-
-    return match_count
+    # Auto-cancel any lingering non-filled orders from previous days
+    stale_orders = TradeOrder.objects.filter(
+        status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
+        order_date__lt=execution_date
+    )
+    
+    count = stale_orders.count()
+    stale_orders.update(status=TradeOrder.OrderStatus.CANCELLED)
+    
+    # Return count to maintain compatibility with existing return type
+    return count
 
 def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
     """

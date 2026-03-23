@@ -158,12 +158,18 @@ class Simulation(models.Model):
 
     @property
     def market_value(self):
-        """
-        Calculates total market value based on historical close prices 
-        relative to the current_virtual_date.
-        """
-        # Logic to be handled in views or specific manager to ensure historical accuracy
-        return ZERO 
+
+        from .models import Simulation_Holding, DailyPrice
+        total = ZERO
+        holdings = self.holdings.all()
+        for h in holdings:
+            price_rec = DailyPrice.objects.filter(
+                symbol=h.symbol, 
+            trade_date__lte=self.current_virtual_date
+            ).order_by('-trade_date').first()
+            if price_rec:
+                total += h.quantity * price_rec.close_price
+        return total
 
     class Meta:
         constraints = [
@@ -198,7 +204,7 @@ class TradeOrder(models.Model):
     quantity = models.IntegerField()
     filled_quantity = models.IntegerField(default=0)
     
-    status = models.CharField(max_length=10, choices=OrderStatus.choices, default=OrderStatus.PENDING)
+    status = models.CharField(max_length=10, choices=OrderStatus.choices, default=OrderStatus.FILLED)
     order_date = models.DateField() # The virtual date when the order was placed
     created_at = models.DateTimeField(auto_now_add=True)
     # 在 TradeOrder 类中添加

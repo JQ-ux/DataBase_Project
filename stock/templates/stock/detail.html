@@ -1,6 +1,8 @@
- {% extends "stock/base.html" %}
+{% extends "stock/base.html" %}
 
 {% block body %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <style>
     /* 盘口行悬停效果 */
     .depth-row { transition: all 0.2s; cursor: pointer; }
@@ -125,7 +127,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="card shadow-sm border-0 mb-4">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-pie-chart text-warning me-2"></i>财务比率趋势</h5>
@@ -147,7 +149,9 @@
                     </div>
                 </div>
             </div>
-        </div><div class="col-lg-4">
+        </div>
+
+        <div class="col-lg-4">
             {% if holding %}
             <div class="card border-0 shadow-sm mb-3 bg-dark text-white">
                 <div class="card-body">
@@ -170,8 +174,9 @@
                 <div class="card-body p-4">
                     <h5 class="fw-bold mb-4">创建委托单</h5>
                     
-                    <form action="{% url 'process_transaction' %}" method="post">
+                    <form id="transactionForm" method="post">
                         {% csrf_token %}
+                        <input type="hidden" name="sim_id" value="{{ sim.id }}">
                         <input type="hidden" name="symbol" value="{{ company.symbol }}">
                         
                         <div class="mb-3">
@@ -195,10 +200,10 @@
 
                         <div class="row g-2">
                             <div class="col">
-                                <button type="submit" name="type" value="BUY" class="btn btn-danger btn-lg w-100 py-3 fw-bold shadow-sm">买入</button>
+                                <button type="button" onclick="handleTrade('BUY')" class="btn btn-danger btn-lg w-100 py-3 fw-bold shadow-sm">买入</button>
                             </div>
                             <div class="col">
-                                <button type="submit" name="type" value="SELL" class="btn btn-success btn-lg w-100 py-3 fw-bold shadow-sm">卖出</button>
+                                <button type="button" onclick="handleTrade('SELL')" class="btn btn-success btn-lg w-100 py-3 fw-bold shadow-sm">卖出</button>
                             </div>
                         </div>
                     </form>
@@ -222,7 +227,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-    // 1. filling
+    // 1. 快速填单功能
     function quickFill(price) {
         const priceInput = document.getElementById('inputPrice');
         if (priceInput) {
@@ -232,36 +237,83 @@
         }
     }
 
-    // 2. Dynamic Financial Indicator Logic
+    // 2. 核心交易处理逻辑 (优雅弹窗版)
+    function handleTrade(side) {
+        const form = document.getElementById('transactionForm');
+        
+        // 验证表单填写
+        if (!form.reportValidity()) return;
+
+        const formData = new FormData(form);
+        formData.append('type', side);
+
+        // 弹出加载框
+        Swal.fire({
+            title: '正在提交委托...',
+            text: '请稍候，正在为您撮合交易',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        // 异步请求后端
+        fetch("{% url 'process_transaction' %}", {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 成功提示
+                Swal.fire({
+                    icon: 'success',
+                    title: '委托已受理',
+                    text: data.message || '您的订单已成功成交！',
+                    confirmButtonText: '确定',
+                    timer: 2000
+                }).then(() => {
+                    location.reload(); // 成功后刷新页面
+                });
+            } else {
+                // 失败提示 (例如余额不足、超出涨跌停)
+                Swal.fire({
+                    icon: 'error',
+                    title: '交易受阻',
+                    text: data.message || data.error || '未知错误，请检查输入',
+                    confirmButtonText: '返回修改'
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+            Swal.fire({
+                icon: 'error',
+                title: '网络连接失败',
+                text: '无法连接到交易服务器，请稍后再试。'
+            });
+        });
+    }
+
+    // 3. 财务图表逻辑
     const chartLabels = {{ chart_dates_json|safe }};
     const ctx = document.getElementById('ratioChart').getContext('2d');
     
-    // Initialize chart with empty data
     let ratioChart = new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: chartLabels,
-            datasets: []
-        },
+        data: { labels: chartLabels, datasets: [] },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { 
-                legend: { position: 'top' } 
-            },
+            plugins: { legend: { position: 'top' } },
             scales: {
-                y: { 
-                    beginAtZero: false, 
-                    grid: { color: '#f0f0f0' } 
-                },
-                x: { 
-                    grid: { display: false } 
-                }
+                y: { beginAtZero: false, grid: { color: '#f0f0f0' } },
+                x: { grid: { display: false } }
             }
         }
     });
 
-    // Handle formula calculation via AJAX
     document.getElementById('btn-calculate-formula').addEventListener('click', function() {
         const formulaInput = document.getElementById('custom-formula-input');
         const formula = formulaInput.value;
@@ -269,18 +321,15 @@
         const btn = this;
         const originalHtml = btn.innerHTML;
 
-        // UI feedback: Disable button and show spinner
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
-        // Call the indicator API defined in urls.py
         fetch(`/api/v1/indicators/calculate/?symbol=${symbol}&formula=${encodeURIComponent(formula)}`)
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    alert("Calculation Error: " + data.error);
+                    Swal.fire('计算失败', data.error, 'warning');
                 } else {
-                    // Update chart with new data from server
                     ratioChart.data.datasets = [{
                         label: formula,
                         data: data.values,
@@ -293,11 +342,9 @@
                 }
             })
             .catch(error => {
-                console.error('Fetch error:', error);
-                alert("Server connection failed.");
+                Swal.fire('错误', '服务器连接失败', 'error');
             })
             .finally(() => {
-                // Restore button state
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
             });
