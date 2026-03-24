@@ -9,19 +9,22 @@
             <div class="card border-0 shadow-sm bg-dark text-white overflow-hidden" style="border-radius: 12px;">
                 <div class="card-body p-4">
                     <div class="row align-items-center">
-                        <div class="col-md-4 border-end border-secondary">
-                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">当前总资产 (NAV)</h6>
-                            <h2 class="fw-bold mb-0 text-primary-emphasis">¥{{ total_assets|floatformat:2 }}</h2>
+                        <div class="col-md-4 border-end border-secondary px-md-4">
+                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">账户总资产 (NAV)</h6>
+                            <h3 class="fw-bold mb-0 text-white">
+                                ¥{{ total_assets|floatformat:2 }}
+                                <i class="bi bi-info-circle fs-6 opacity-50" title="可用余额 + 持仓市值"></i>
+                            </h3>
                             <p class="small mb-0 mt-2">
-                                <span class="text-white-50">初始本金: ¥{{ sim.initial_cash|floatformat:2 }}</span>
+                                <span class="text-white-50">持仓总市值: ¥{{ total_stock_value|floatformat:2 }}</span>
                             </p>
                         </div>
                         
                         <div class="col-md-4 border-end border-secondary px-md-4">
-                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">可用资金 (CASH)</h6>
+                            <h6 class="text-white-50 mb-1 small text-uppercase tracking-wider">可用余额 (CASH)</h6>
                             <h3 class="fw-bold mb-0 text-info">¥{{ sim.available_cash|floatformat:2 }}</h3>
                             <p class="small mb-0 mt-2">
-                                <span class="text-white-50">持仓市值: ¥{{ total_stock_value|floatformat:2 }}</span>
+                                <span class="text-white-50">可即时购买股票</span>
                             </p>
                         </div>
                         
@@ -38,7 +41,26 @@
                     </div>
                 </div>
             </div>
-        </div>
+            
+            <div class="card border-0 shadow-sm mt-3" style="border-radius: 12px; background-color: #f8f9fa;">
+                <div class="card-body py-2 px-4">
+                    <div class="row align-items-center small text-muted">
+                        <div class="col-md-auto fw-bold text-uppercase tracking-wider">
+                            <i class="bi bi-shield-check me-1 text-success"></i>账本审计 (Entropy Audit):
+                        </div>
+                        <div class="col-md text-center border-start">
+                            理论现金: <span class="text-dark fw-bold">¥{{ theoretical_cash|floatformat:2 }}</span>
+                        </div>
+                        <div class="col-md text-center border-start border-end">
+                            累计手续费: <span class="text-danger fw-bold">- ¥{{ total_fees_sum|floatformat:2 }}</span>
+                        </div>
+                        <div class="col-md text-center">
+                            账面余额: <span class="text-info-emphasis fw-bold">¥{{ sim.available_cash|floatformat:2 }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
     </div>
 
     <div class="row">

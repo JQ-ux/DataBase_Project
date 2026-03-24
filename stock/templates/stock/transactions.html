@@ -79,7 +79,7 @@
                                             <div class="fw-bold {% if tx.type == 'BUY' %}text-success{% else %}text-danger{% endif %}">
                                                 {% if tx.type == 'BUY' %}-{% else %}+{% endif %}¥{{ tx.total_value|floatformat:2 }}
                                             </div>
-                                            <div class="x-small text-muted">含税费: ¥{{ tx.fee|floatformat:2 }}</div>
+                                            <div class="x-small text-muted">含税费: ¥{{ tx.fees|floatformat:2 }}</div>
                                         </td>
 
                                         <td>

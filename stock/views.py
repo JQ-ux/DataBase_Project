@@ -19,6 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.decorators import user_passes_test
+from .models import Simulation_Cash_Flow
 import ast
 import operator
 # ==========================================
@@ -630,7 +631,7 @@ def process_transaction(request):
                     sim=sim, symbol=company, 
                     defaults={'quantity': 0, 'avg_cost': ZERO}
                 )
-                total_cost = (holding.quantity * holding.avg_cost) + subtotal
+                total_cost = (holding.quantity * holding.avg_cost) + subtotal + estimated_fee
                 holding.quantity += qty
                 holding.avg_cost = (total_cost / holding.quantity).quantize(Decimal('0.0001'))
                 holding.save()
@@ -667,16 +668,33 @@ def process_transaction(request):
                 avg_cost_snapshot=avg_cost_at_order if side == "SELL" else ZERO
             )
 
-            # 8. Log Cash Flow (For Buyer Only)
-            if side == 'BUY':
-                Simulation_Cash_Flow.objects.create(
-                    sim=sim,
-                    request_id=f"EXEC_{new_order.id}", # Change FREEZE to EXEC to reflect reality
-                    change_type='TRADE',               # FEE is too narrow, this was a full trade
-                    before_balance=sim.available_cash + total_required,
-                    amount=-total_required,
-                    after_balance=sim.available_cash
-                )
+            # 8. Log Cash Flow (Audit Trail for Entropy/Fees)
+            # ------------------------------------------------------
+            # First, determine the total cash impact to calculate before_balance correctly
+            cash_impact = -total_required if side == 'BUY' else net_proceeds
+            initial_balance_before_trade = sim.available_cash - cash_impact
+
+            # A. Record the Trade Principal (The "Mass" of the trade)
+            Simulation_Cash_Flow.objects.create(
+                sim=sim,
+                request_id=f"TRADE_{new_order.id}",
+                change_type=side, # 'BUY' or 'SELL'
+                before_balance=initial_balance_before_trade,
+                amount=-subtotal if side == 'BUY' else subtotal,
+                after_balance=initial_balance_before_trade + (-subtotal if side == 'BUY' else subtotal)
+            )
+
+            # B. Record the Fee Separately (This is the "Entropy" you are looking for)
+            # This specific entry is what your views.py queries to show total_fees_sum
+            current_temp_balance = initial_balance_before_trade + (-subtotal if side == 'BUY' else subtotal)
+            Simulation_Cash_Flow.objects.create(
+                sim=sim,
+                request_id=f"FEE_{new_order.id}",
+                change_type='FEE', # Must match the query in your views.py
+                before_balance=current_temp_balance,
+                amount=-estimated_fee, # Fees always decrease the system's available cash
+                after_balance=sim.available_cash
+            )
 
             # ---  9. Record Audit Trail for "Operation Logs" UI ---
             # This ensures the trade appears in transactions_view immediately.
@@ -688,6 +706,7 @@ def process_transaction(request):
                 type=side,                   # 'BUY' or 'SELL'
                 quantity=qty,
                 price=order_price,
+                fees=estimated_fee,
                 total_amount=subtotal + estimated_fee if side == 'BUY' else subtotal - estimated_fee,
                 matched_order=new_order,
                 realized_pnl=ZERO if side == 'BUY' else (order_price - avg_cost_at_order) * qty - estimated_fee
@@ -810,28 +829,32 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
         # A & C. Buyer Side Logic (Only if b_order exists)
         # ==========================================
         if b_order:
-            # A. Update Buyer's Portfolio (Simulation_Holding)
-            b_holding, created = Simulation_Holding.objects.get_or_create(
-                sim=b_order.sim,
-                symbol=b_order.symbol,
-                defaults={'quantity': 0, 'avg_cost': ZERO}
-            )
-            total_cost = (b_holding.quantity * b_holding.avg_cost) + subtotal + buy_fee
-            b_holding.quantity += qty
-            b_holding.avg_cost = quantize_4(total_cost / b_holding.quantity)
-            b_holding.save()
+            # A. Update Buyer's Portfolio (Only if not already processed)
+            if b_order.status != TradeOrder.OrderStatus.FILLED:
+                b_holding, created = Simulation_Holding.objects.get_or_create(
+                    sim=b_order.sim,
+                    symbol=b_order.symbol,
+                    defaults={'quantity': 0, 'avg_cost': ZERO}
+                )
+                total_cost = (b_holding.quantity * b_holding.avg_cost) + subtotal
+                b_holding.quantity += qty
+                b_holding.avg_cost = quantize_4(total_cost / b_holding.quantity)
+                b_holding.save()
 
-            # C. Buyer Refund Logic
-            # Frozen: (limit_price * qty) + fee. Actual: (exec_price * qty) + fee.
-            frozen_unit_price = b_order.price + quantize_4(b_order.price * COMMISSION_RATE)
-            actual_unit_price = price + quantize_4(price * COMMISSION_RATE)
-            refund = (frozen_unit_price - actual_unit_price) * qty
+           # C. Buyer Refund Logic (Only if not already processed)
+            if b_order.status != TradeOrder.OrderStatus.FILLED:
+                # Frozen: (limit_price * qty) + fee. Actual: (exec_price * qty) + fee.
+                frozen_unit_price = b_order.price + quantize_4(b_order.price * COMMISSION_RATE)
+                actual_unit_price = price + quantize_4(price * COMMISSION_RATE)
+                refund = (frozen_unit_price - actual_unit_price) * qty
+                
+                if refund > 0:
+                    b_order.sim.available_cash += refund
+                    b_order.sim.save()
             
-            if refund > 0:
-                b_order.sim.available_cash += refund
-                b_order.sim.save()
-
-            # D1. Create Buyer Audit Trail
+            
+            
+            # D1. Create Buyer Transaction Record
             Simulation_Transaction.objects.create(
                 sim=b_order.sim,
                 symbol=b_order.symbol,
@@ -842,17 +865,34 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 price=price,
                 total_amount=subtotal + buy_fee,
                 matched_order=b_order,
-                opponent_order=s_order,  # Will be None if P2M
+                opponent_order=s_order,
                 realized_pnl=ZERO
             )
 
+            
+            #cash_before_fee = b_order.sim.available_cash
+            
+            
+            #b_order.sim.available_cash -= buy_fee
+            #b_order.sim.save()
+
+            # Cash Flow Ledger
+            #Simulation_Cash_Flow.objects.create(
+                #sim=b_order.sim,
+                #change_type='FEE',
+               # before_balance=cash_before_fee,      
+               # amount=-buy_fee,                     
+               # after_balance=b_order.sim.available_cash,  
+               # request_id=f"FEE_B_{b_order.id}_{int(timezone.now().timestamp())}"
+            #)
         # ==========================================
-        # B. Seller Side Logic (Only if s_order exists)
+        # Seller Side Logic (Only if s_order exists)
         # ==========================================
         if s_order:
-            # B. Update Seller's Cash
-            s_order.sim.available_cash += (subtotal - sell_fee)
-            s_order.sim.save()
+            # Update Seller's Cash (Only if not already processed)
+            if s_order.status != TradeOrder.OrderStatus.FILLED:
+                s_order.sim.available_cash += (subtotal - sell_fee)
+                s_order.sim.save()
 
             cost_at_order_time = s_order.avg_cost_snapshot or ZERO
             
@@ -860,7 +900,7 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
             realized_pnl = (price - cost_at_order_time) * qty - sell_fee
             print("DEBUG SELL >>>", price, cost_at_order_time, qty, realized_pnl)
 
-            # D2. Create Seller Audit Trail
+            # D2. Create Seller Transaction Record
             Simulation_Transaction.objects.create(
                 sim=s_order.sim,
                 symbol=s_order.symbol,
@@ -871,9 +911,20 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 price=price,
                 total_amount=subtotal - sell_fee,
                 matched_order=s_order,
-                opponent_order=b_order,  # Will be None if P2M
+                opponent_order=b_order,
                 realized_pnl=realized_pnl
             )
+
+            # D2-Fee. Record Seller's Commission (Only if not already processed)
+            if s_order.status != TradeOrder.OrderStatus.FILLED:
+                Simulation_Cash_Flow.objects.create(
+                    sim=s_order.sim,
+                    change_type='FEE',
+                    before_balance=s_order.sim.available_cash + sell_fee,
+                    amount=-sell_fee,
+                    after_balance=s_order.sim.available_cash,
+                    request_id=f"FEE_S_{s_order.id}_{int(timezone.now().timestamp())}"
+                )
 
         # ==========================================
         # E. Update Orders Status (Support Partial Fills)
@@ -1271,6 +1322,19 @@ def portfolio_view(request):
         chart_labels = [h.record_date.strftime("%m-%d") for h in nav_history_qs]
         chart_values = [float(h.nav) for h in nav_history_qs]
 
+        # 1. Capture the sum. Ensure we handle negative values from the ledger.
+        fee_data = Simulation_Cash_Flow.objects.filter(
+            sim=active_sim, 
+            change_type=Simulation_Cash_Flow.FlowType.FEE # Use the Class constant to be safe
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.0000')
+
+        # 2. Always store as a positive magnitude for display
+        total_fees_sum = abs(fee_data)
+
+        # 3. Audit Logic: Theoretical = Actual + Magnitude of Fees
+        theoretical_cash = active_sim.available_cash + total_fees_sum
+
+
         return render(request, "stock/portfolio.html", {
             "holdings_detailed": processed_holdings,
             "sim": active_sim,
@@ -1280,6 +1344,8 @@ def portfolio_view(request):
             "pnl_percent": pnl_rate,
             "chart_labels": chart_labels,
             "chart_values": chart_values,
+            "total_fees_sum": total_fees_sum,
+            "theoretical_cash": theoretical_cash,
         })
     
     return render(request, "stock/portfolio.html", {"holdings_detailed": []})

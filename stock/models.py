@@ -195,10 +195,12 @@ class Simulation(models.Model):
         """
         from .models import Simulation_Cash_Flow
         # Summing all negative amounts marked as 'FEE'
-        return self.cash_flows.filter(
-            change_type=Simulation_Cash_Flow.FlowType.FEE
-        ).aggregate(models.Sum('amount'))['amount__sum'] or Decimal('0.0000')
-
+        result = self.cash_flows.filter(change_type=Simulation_Cash_Flow.FlowType.FEE).aggregate(models.Sum('amount'))['amount__sum']
+        return abs(result) if result else Decimal('0.0000')
+    @property
+    def total_realized_pnl(self):
+        result = self.transactions.aggregate(models.Sum('realized_pnl'))['realized_pnl__sum']
+        return result if result else Decimal('0.0000')
     @property
     def market_value(self):
 
@@ -283,6 +285,7 @@ class Simulation_Transaction(models.Model):
     matched_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, blank=True)
     opponent_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, blank=True,related_name='counterpart_transactions')
     realized_pnl = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    fees = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.0000'))
 
     
 class Simulation_Cash_Flow(models.Model):
