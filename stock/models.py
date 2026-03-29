@@ -150,7 +150,7 @@ class Simulation(models.Model):
 
     initial_cash = models.DecimalField(max_digits=20, decimal_places=4)
     available_cash = models.DecimalField(max_digits=20, decimal_places=4, default=ZERO)
-    current_nav = models.DecimalField(max_digits=20, decimal_places=4, default=ZERO)
+
     
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
     mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.LIVE)
@@ -159,7 +159,8 @@ class Simulation(models.Model):
     def save(self, *args, **kwargs):
         """
         Overrides the save method to automate ledger initialization.
-        Ensures that every new simulation starts with a verifiable 'INIT' cash flow.
+        When a new simulation is created, we set available_cash = initial_cash
+        and create an initial cash flow record for audit purposes.
         """
         # 1. Check if this is a new instance creation
         is_new = self._state.adding 
@@ -167,7 +168,7 @@ class Simulation(models.Model):
         if is_new:
             # 2. Sync financial fields with initial_cash on creation
             self.available_cash = self.initial_cash
-            self.current_nav = self.initial_cash
+            
 
         # 3. Save the Simulation instance first to get an ID
         super().save(*args, **kwargs)

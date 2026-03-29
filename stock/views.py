@@ -245,7 +245,6 @@ def register_view(request):
                     current_virtual_date=shared_virtual_date,
                     initial_cash=INITIAL_BALANCE,
                     available_cash=INITIAL_BALANCE,
-                    current_nav=INITIAL_BALANCE
                 )
 
                 # 4. Create the initial NAV history entry for the shared start date
@@ -350,7 +349,6 @@ def index(request):
             current_virtual_date=virtual_today, # Sync with global clock
             initial_cash=INITIAL_BALANCE,
             available_cash=INITIAL_BALANCE,
-            current_nav=INITIAL_BALANCE
         )
         # Create the initial record for the performance chart
         Simulation_NAV_History.objects.create(
@@ -429,6 +427,7 @@ def index(request):
         "popular_stocks": processed_stocks,
         "industries": all_industries,               
         "current_industry": selected_industry_id,
+        "total_nav": total_nav,
         "total_profit": total_nav - active_sim.initial_cash,
         "profit_rate": round(((total_nav - active_sim.initial_cash) / active_sim.initial_cash * 100), 2),
         "chart_labels_json": json.dumps(chart_labels),
@@ -988,7 +987,6 @@ def advance_simulation_date(request, sim_id=None):
             new_nav, mkt_val = calculate_nav_optimized(sim, new_date)
             
             # Update simulation record
-            sim.current_nav = new_nav
             sim.current_virtual_date = new_date
             sim.save()
 
