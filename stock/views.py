@@ -267,7 +267,7 @@ def register_view(request):
 import traceback
 from django.http import HttpResponse
 
-
+@csrf_exempt
 def login_view(request):
     print("\n====== LOGIN DEBUG START ======")
 
@@ -293,7 +293,7 @@ def login_view(request):
             if user is not None:
                 login(request, user)
                 print("login success")
-                return HttpResponse("LOGIN SUCCESS")
+                return HttpResponseRedirect(reverse("index"))
             else:
                 print("authenticate failed")
                 return HttpResponse("AUTH FAILED")

@@ -17,6 +17,7 @@ urlpatterns = [
     # 2. Authentication
     # ==========================================
     path("login/", views.login_view, name="login"),
+    path('accounts/login/', views.login_view),
     path("register/", views.register_view, name="register"),
     path("logout/", views.logout_view, name="logout"),
     path("api/current_sim/", views.current_sim),
