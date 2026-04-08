@@ -19,9 +19,27 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.decorators import user_passes_test
+from django.shortcuts import render, HttpResponseRedirect, get_object_or_404  
 from .models import Simulation_Cash_Flow
 import ast
 import operator
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+import os
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase.ttfonts import TTFont
+from django.http import HttpResponse
+import io
+import uuid
+
+
+FONT_PATH = r"C:\Users\24300\Desktop\Stock\fonts\msyh.ttc"
+if os.path.exists(FONT_PATH):
+    font_prop = font_manager.FontProperties(fname=FONT_PATH)
+    plt.rcParams['font.sans-serif'] = [font_prop.get_name()]
+    plt.rcParams['axes.unicode_minus'] = False
 # ==========================================
 # GLOBAL SETTINGS & PRECISION CONSTANTS
 # ==========================================
@@ -863,6 +881,8 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 quantity=qty,
                 price=price,
                 total_amount=subtotal + buy_fee,
+                fees=buy_fee,  
+                voucher_no=f"B{uuid.uuid4().hex[:12].upper()}",
                 matched_order=b_order,
                 opponent_order=s_order,
                 realized_pnl=ZERO
@@ -909,6 +929,8 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 quantity=qty,
                 price=price,
                 total_amount=subtotal - sell_fee,
+                fees=sell_fee, 
+                voucher_no=f"S{uuid.uuid4().hex[:12].upper()}",
                 matched_order=s_order,
                 opponent_order=b_order,
                 realized_pnl=realized_pnl
@@ -1455,3 +1477,95 @@ def api_calculate_custom_indicator(request):
     except Exception as e:
         # Return the specific error message (e.g., "Variable not found" or "Syntax Error")
         return JsonResponse({"success": False, "error": str(e)})
+    
+def generate_transaction_pdf(request, transaction_id):
+    try:
+        tx = Simulation_Transaction.objects.get(id=transaction_id, sim__user=request.user)
+    except Simulation_Transaction.DoesNotExist:
+        return HttpResponse("凭证不存在", status=404)
+
+    buffer = io.BytesIO()
+
+    p = canvas.Canvas(buffer, pagesize=(595.27, 841.89))
+    width, height = (595.27, 841.89)
+
+    try:
+        pdfmetrics.registerFont(TTFont('msyh', FONT_PATH))
+        p.setFont('msyh', 12)
+    except:
+        p.setFont('Helvetica', 12)
+
+   
+    p.setFillColorRGB(0.1, 0.1, 0.1)
+    p.rect(0, height - 60, width, 60, stroke=0, fill=1)
+
+
+    p.setFillColorRGB(1, 1, 1)
+    try: p.setFont('msyh', 16)
+    except: p.setFont('Helvetica', 16)
+    p.drawString(50, height - 38, f"交易电子凭证 | {tx.sim.name}")
+
+
+    p.setFillColorRGB(0, 0, 0)
+    y_position = height - 100
+    line_height = 25
+
+
+    data = [
+        ("凭证编号", f"{tx.voucher_no or 'N/A'}"),
+        ("交易日期", f"{tx.trade_date.strftime('%Y-%m-%d %H:%M') if hasattr(tx.trade_date, 'strftime') else tx.trade_date}"),
+        ("证券信息", f"{tx.symbol.full_name} ({tx.symbol.symbol})"),
+        ("交易方向", "买入 (BUY)" if tx.type == 'BUY' else "卖出 (SELL)"),
+        ("成交价格", f"¥{tx.price:,.2f}"),
+        ("成交数量", f"{tx.quantity:,} 股"),
+        ("手续费", f"¥{tx.fees:,.2f}"),
+        ("成交总额", f"¥{tx.total_amount:,.2f}"),
+    ]
+    
+    if tx.type == 'SELL':
+        data.append(("结算盈亏", f"¥{tx.realized_pnl:,.2f}"))
+
+
+    for label, value in data:
+
+        p.setStrokeColorRGB(0.9, 0.9, 0.9)
+        p.line(50, y_position - 5, width - 50, y_position - 5)
+        
+        try: p.setFont('msyh', 10)
+        except: p.setFont('Helvetica', 10)
+        p.setFillColorRGB(0.4, 0.4, 0.4)
+        p.drawString(60, y_position, label)
+        
+        p.setFillColorRGB(0, 0, 0)
+        p.drawRightString(width - 60, y_position, value)
+        
+        y_position -= line_height
+
+    p.setStrokeColorRGB(0.8, 0, 0)
+    p.circle(width - 100, height - 250, 40, stroke=1, fill=0)
+    p.setFillColorRGB(0.8, 0, 0)
+    try: p.setFont('msyh', 10)
+    except: p.setFont('Helvetica', 10)
+    p.drawCentredString(width - 100, height - 245, "模拟交易")
+    p.drawCentredString(width - 100, height - 260, "核算专用")
+
+    
+    p.setFillColorRGB(0.6, 0.6, 0.6)
+    try: p.setFont('msyh', 8)
+    except: p.setFont('Helvetica', 8)
+    p.drawCentredString(width/2, 50, "注：本凭证仅供模拟实验使用，不具备法律效力。")
+
+    p.showPage()
+    p.save()
+    
+    buffer.seek(0)
+    
+    filename = f"Voucher_{tx.voucher_no}.pdf" if tx.voucher_no else "Transaction_Receipt.pdf"
+    
+
+
+    return HttpResponse(
+        buffer, 
+        content_type='application/pdf', 
+        headers={'Content-Disposition': f'inline; filename="{filename}"'}
+    )

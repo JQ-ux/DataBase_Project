@@ -43,4 +43,8 @@ urlpatterns = [
     # ==========================================
     path("simulation/advance/", views.advance_simulation_date, name="advance_date"),
     path("simulation/report/", views.simulation_performance, name="simulation_performance"),
+
+    # 6. Reports & Documents (New Section)
+
+    path("transaction/pdf/<int:transaction_id>/", views.generate_transaction_pdf, name="generate_transaction_pdf"),
 ]

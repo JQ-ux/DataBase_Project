@@ -4,6 +4,7 @@ from django.db.models import Sum, F, Q
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 from django.utils import timezone
+import uuid
 # ==========================================
 # 0. Global Constants
 # ==========================================
@@ -253,7 +254,7 @@ class TradeOrder(models.Model):
     status = models.CharField(max_length=10, choices=OrderStatus.choices, default=OrderStatus.FILLED)
     order_date = models.DateField() # The virtual date when the order was placed
     created_at = models.DateTimeField(auto_now_add=True)
-    # 在 TradeOrder 类中添加
+   
     avg_cost_snapshot = models.DecimalField(
         max_digits=18, 
         decimal_places=4, 
@@ -270,6 +271,21 @@ class TradeOrder(models.Model):
 # 4. Trading & Auditing
 # ==========================================
 class Simulation_Transaction(models.Model):
+    voucher_no = models.CharField(
+        max_length=64, 
+       
+        db_index=True, 
+        null=True, 
+        blank=True,
+        verbose_name="凭证编号"
+    )
+    
+
+    digital_signature = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True
+    )
     class TransType(models.TextChoices):
         BUY = 'BUY', 'Buy'
         SELL = 'SELL', 'Sell'
@@ -287,6 +303,25 @@ class Simulation_Transaction(models.Model):
     opponent_order = models.ForeignKey(TradeOrder, on_delete=models.SET_NULL, null=True, blank=True,related_name='counterpart_transactions')
     realized_pnl = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     fees = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.0000'))
+
+    def save(self, *args, **kwargs):
+        
+        if not self.voucher_no:
+            
+            count = Simulation_Transaction.objects.filter(sim=self.sim).count()
+            order_number = count + 1
+            
+            
+            self.voucher_no = f"TX-{self.sim.id}-{order_number:04d}"
+            
+        
+        if not self.digital_signature:
+            self.digital_signature = uuid.uuid4().hex
+            
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.voucher_no} - {self.symbol_id} ({self.type})"
 
     
 class Simulation_Cash_Flow(models.Model):
