@@ -29,7 +29,7 @@ class Industry(models.Model):
     Industry Model
     """
     name = models.CharField(max_length=100, unique=True)
-    sector = models.CharField(max_length=100, blank=True, null=True) # 对应你看到的 Sector: Technology
+    sector = models.CharField(max_length=100, blank=True, null=True) 
     description = models.TextField(blank=True, null=True)
 
     def __str__(self):

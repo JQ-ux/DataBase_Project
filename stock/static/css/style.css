@@ -232,3 +232,54 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
     padding-top: 60px !important; /* 移动端可能略小 */
   }
 }
+
+/* ===== 登录页面背景图片 ===== */
+.login-page {
+  background: url('/static/img/backgrounds/background-finance-2.png') no-repeat center center fixed;
+  background-size: cover;
+  background-attachment: fixed;
+  min-height: 100vh;
+  position: relative;
+}
+
+/* 添加半透明遮罩，确保文字可读 */
+.login-page::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: -1;
+}
+
+/* 确保登录表单在背景上清晰可见 */
+.login-form {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  padding: 30px;
+}
+
+/* 保留背景，只移除登录表单外框 */
+.login-form-container {
+  /* 移除卡片样式 */
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+/* 保持登录内容区域清晰可见 */
+.login-form-content {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-radius: 12px !important;
+  padding: 30px !important;
+  /* 重要：确保内容区域有适当内边距 */
+  margin: 0 auto;
+  max-width: 400px;
+}
+
+/* 移除底部浅色条 */
+.login-footer {
+  display: none !important;
+}

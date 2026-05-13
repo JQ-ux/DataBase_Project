@@ -33,7 +33,15 @@ from reportlab.pdfbase.ttfonts import TTFont
 from django.http import HttpResponse
 import io
 import uuid
+from agents.brain import FinancialBrain
 
+
+try:
+    print("--- [System] 正在初始化 Ada-Finance AI 引擎... ---")
+    ada_brain = FinancialBrain(model_name="qwen2.5:7b") 
+except Exception as e:
+    print(f"--- [Warning] AI 引擎初始化失败: {e} ---")
+    ada_brain = None
 
 FONT_PATH = r"C:\Users\24300\Desktop\Stock\fonts\msyh.ttc"
 if os.path.exists(FONT_PATH):
@@ -1569,3 +1577,41 @@ def generate_transaction_pdf(request, transaction_id):
         content_type='application/pdf', 
         headers={'Content-Disposition': f'inline; filename="{filename}"'}
     )
+
+
+
+@csrf_exempt
+@login_required
+def ai_chat_api(request):
+    """
+    AI 助手对话 API 接口
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST 请求"}, status=405)
+
+    try:
+        # 1. 解析前端传来的 JSON
+        data = json.loads(request.body)
+        user_message = data.get('message', '').strip()
+
+        if not user_message:
+            return JsonResponse({"reply": "您想聊点什么呢？比如：帮我分析一下持仓风险。"})
+
+        # 2. 检查 AI 引擎是否就绪
+        if not ada_brain:
+            return JsonResponse({"reply": "抱歉，AI 引擎暂时离线，请联系管理员检查 Ollama 服务。"})
+
+        # 3. 让 Agent 思考 (它会自动处理你的虚拟日期和持仓)
+        # 注意：我们在 brain.py 里已经对齐了你的 current_virtual_date 字段
+        print(f"--- [AI Request] 用户 {request.user.username} 提问: {user_message} ---")
+        ai_reply = ada_brain.think(request.user, user_message)
+
+        return JsonResponse({
+            "reply": ai_reply,
+            "status": "success"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc() # 在终端打印错误详情方便调试
+        return JsonResponse({"reply": f"我的大脑出了一点小状况: {str(e)}"}, status=500)

@@ -1,0 +1,46 @@
+{
+  "agent_id": "Fin-Insight-Expert-Pro",
+  "version": "2.0",
+  "description": "融合 AdaRHD-S 优化引擎与多源 RAG 的深度金融分析智能体",
+  "knowledge_base": {
+    "structured_source": ["PostgreSQL (Django Models)", "Tick-Level Historical Data"],
+    "unstructured_source": ["SEC Filings (10-K/10-Q)", "Market News RSS", "Professional Analyst Reports"],
+    "embedding_model": "text-embedding-3-large",
+    "vector_store": "ChromaDB / pgvector",
+    "retrieval_strategy": "Hybrid Search (Keyword + Semantic + Knowledge Graph)"
+  },
+  "reasoning_engine": {
+    "logic_framework": "ReAct (Reasoning and Acting)",
+    "optimization_algorithm": "AdaRHD-S (Riemannian Manifold Single-Loop Adaptive Engine)",
+    "planning_capability": "Multi-step Financial Modeling & Backtesting"
+  },
+  "capabilities": [
+    {
+      "action": "deep_portfolio_diagnosis",
+      "description": "超越基础指标，利用波动率对冲及行业相关性进行资产组合穿透分析",
+      "parameters": ["user_id", "risk_tolerance_level", "lookback_period"],
+      "sub_tasks": ["calculate_sharpe_ratio", "sector_exposure_check", "correlation_matrix_analysis"]
+    },
+    {
+      "action": "smart_financial_abstractor",
+      "description": "结合非结构化文本与量化数据，对比同业竞争对手进行横向估值分析",
+      "parameters": ["symbol", "peer_group_comparison"],
+      "output_format": "Table + Synthesis Executive Summary"
+    },
+    {
+      "action": "proactive_anomaly_detection",
+      "description": "实时监控盘口异动、资金流向及社交媒体情绪震荡，主动触发预警",
+      "trigger_conditions": ["Price Volatility > 5%", "Sentiment Score < -0.6", "Whale Move Detection"]
+    },
+    {
+      "action": "ada_rhd_optimization_suggest",
+      "description": "调用 AdaRHD-S 引擎，在非凸非线性约束下求解最优调仓路径",
+      "parameters": ["target_return", "max_drawdown_limit"]
+    }
+  ],
+  "safety_and_compliance": {
+    "financial_disclaimer": "本分析仅供模拟交易参考，不构成真实市场投资建议。",
+    "hallucination_control": "必须通过 RAG 引用原始数据源，禁止在缺乏数据支持下预测股价绝对值。",
+    "data_privacy": "严格隔离不同用户间的私有持仓数据与交易指令。"
+  }
+}

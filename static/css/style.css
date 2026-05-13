@@ -1,0 +1,234 @@
+/* ====== StockX Pro - 暖金高级金融风格 CSS ====== */
+
+:root {
+  --bg-card: #ffffff;
+  --border-light: #f3e0c4; /* 柔和的浅金/米色边框 */
+  --text-dark: #333333;
+  --text-secondary: #777777;
+  
+  /* 核心主题色 */
+  --theme-gold: #f7b46d; 
+  --theme-gold-light: #fdf6eb;
+  --theme-dark: #231f1a; /* 黑色信息栏背景 */
+  
+  /* 涨跌颜色 (对应截图中的红蓝绿) */
+  --glow-green: #2fa84f;
+  --glow-red: #d93a3a;
+  --glow-blue: #2d73b3;
+}
+
+/* =========================================
+   全局背景：米白 → 活力沙金/橘色的平滑过渡 
+   ========================================= */
+body {
+  margin: 0;
+  padding: 0;
+  /* 移除干扰的图片，使用纯净的渐变还原截图中的全局背景 */
+  background: linear-gradient(to bottom, #fcfaf8 0%, #ffbe84 100%) no-repeat center center fixed;
+  background-size: cover;
+  color: var(--text-dark);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.5;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* =========================================
+   顶部横幅 (保留你的金币背景图容器)
+   ========================================= */
+.banner-container {
+  height: 220px;
+  position: relative;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+.banner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* =========================================
+   【新增】深色信息栏 (当前模拟交易日)
+   ========================================= */
+.dark-info-bar {
+  background: var(--theme-dark);
+  color: #f7d082; /* 金色文字 */
+  border-radius: 8px;
+  padding: 12px 20px;
+  margin: 15px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #4a3c28;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+.dark-info-bar .badge {
+  background-color: #dfa951 !important;
+  color: #231f1a !important;
+}
+
+/* =========================================
+   卡片基础风格：白底 + 浅金边框 + 暖色阴影
+   ========================================= */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px; /* 截图中圆角适中 */
+  color: var(--text-dark);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(220, 140, 60, 0.08); /* 暖色系阴影 */
+  margin-bottom: 20px;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(220, 140, 60, 0.15);
+}
+.card-body {
+  padding: 20px;
+}
+
+/* =========================================
+   【专属卡片】账户总资产 (左上角第一张卡片)
+   ========================================= */
+.card-highlight {
+  /* 直接使用 D2B48C 沙棕色 */
+  background: #D2B48C !important;
+  border: 1px solid #A68A6A !important; /* 深色边框 */
+  color: #222222 !important; /* 确保文字颜色清晰 */
+}
+
+/* 进度条/装饰横线 (总资产数字下方) */
+.asset-progress {
+  height: 3px;
+  background: #ffffff;
+  border-radius: 2px;
+  margin-top: 10px;
+  width: 40%; 
+  position: relative;
+  display: block;
+}
+.asset-progress::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 100%;
+  width: 150%; 
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+}
+
+/* =========================================
+   【专属表头】右侧带背景色的卡片表头
+   ========================================= */
+.card-header-orange {
+  background: var(--theme-gold) !important;
+  color: var(--text-dark) !important;
+  font-weight: 600;
+  border-bottom: none;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  padding: 12px 20px;
+}
+
+/* =========================================
+   表格样式统一 & 隔行渐变
+   ========================================= */
+.table {
+  margin-bottom: 0;
+}
+.table th {
+  background: var(--theme-gold-light);
+  font-weight: 600;
+  color: var(--text-dark);
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border-light);
+  border-top: none;
+}
+.table td {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-light);
+  vertical-align: middle;
+}
+
+/* 市场探索：隔行渐变 (保留你的要求) */
+.table tbody tr:nth-child(even) {
+  background: linear-gradient(to right, rgba(246, 182, 117, 0.04) 0%, rgba(246, 182, 117, 0.12) 100%);
+}
+.table tbody tr:hover {
+  background: rgba(246, 182, 117, 0.15);
+}
+
+/* =========================================
+   功能性颜色 & 字体
+   ========================================= */
+h1, h2, h3, h4, h5, h6 { font-weight: 600; }
+.text-profit { color: var(--glow-green) !important; }
+.text-loss { color: var(--glow-red) !important; font-weight: bold; } /* 截图中的红色卖价偏粗体 */
+.text-blue { color: var(--glow-blue) !important; font-weight: bold; } /* 截图中有蓝色的数值 */
+.text-gold { color: #d68910 !important; font-weight: bold; } /* 冻结资金的金币符号 */
+
+/* =========================================
+   按钮样式 (截图中的白色描边小按钮)
+   ========================================= */
+.btn-outline-action {
+  background: #ffffff;
+  border: 1px solid #dcdcdc;
+  color: #555555;
+  font-size: 0.85rem;
+  padding: 4px 12px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.btn-outline-action:hover {
+  border-color: var(--theme-gold);
+  color: var(--theme-gold);
+  background: #fffbfa;
+}
+
+/* =========================================
+   图表容器
+   ========================================= */
+#performanceChart {
+  background: white;
+  border-radius: 8px;
+  padding: 15px;
+  border: 1px solid var(--border-light);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .dark-info-bar { flex-direction: column; text-align: left; align-items: flex-start; gap: 10px; }
+  .asset-progress { width: 60%; }
+}
+
+
+/* 适中的公司logo尺寸 */
+.company-logo {
+  max-height: 180px !important;   /* 从 120px 减小到 60px */
+  height: auto !important;
+  width: auto !important;
+  margin-left: 30px !important;
+  vertical-align: middle !important;
+  filter: drop-shadow(0 5px 10px rgba(0,0,0,0.25)) !important;
+  max-width: 100% !important;
+  object-fit: contain !important;
+  /* 确保图片不会溢出容器 */
+  flex-shrink: 0 !important;
+  /* 调整图片与文字的垂直对齐 */
+  position: relative !important;
+  top: -4px !important;
+}
+
+/* 防止公司详情页被导航栏遮挡 */
+.container.mt-4 {
+  padding-top: 70px !important;
+}
+
+/* 如果导航栏高度变化，可以调整这个值 */
+@media (max-width: 768px) {
+  .container.mt-4 {
+    padding-top: 60px !important; /* 移动端可能略小 */
+  }
+}

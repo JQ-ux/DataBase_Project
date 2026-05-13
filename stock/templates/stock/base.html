@@ -227,6 +227,102 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 {% endblock %}
+
+
+<div id="ai-chat-bubble" onclick="toggleChat()" style="position: fixed; bottom: 30px; right: 30px; width: 65px; height: 65px; background: #0dcaf0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; box-shadow: 0 5px 20px rgba(0,0,0,0.4); z-index: 99999; transition: all 0.3s ease;">
+    <i class="bi bi-robot" style="font-size: 30px;"></i>
+    <span style="font-size: 10px; position: absolute; bottom: 5px;">AI 助手</span>
+</div>
+
+<div id="ai-chat-window" style="display: none; position: fixed; bottom: 100px; right: 30px; width: 380px; height: 520px; background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); flex-direction: column; z-index: 1050; border: 1px solid #dee2e6; overflow: hidden;">
+    <div style="background: var(--primary-dark); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent-blue);">
+        <span class="fw-bold"><i class="bi bi-cpu-fill text-info me-2"></i>Ada-Finance AI</span>
+        <i class="bi bi-x-lg" onclick="toggleChat()" style="cursor: pointer;"></i>
+    </div>
+    
+    <div id="chat-content" style="flex: 1; padding: 15px; overflow-y: auto; background: #f8f9fa; display: flex; flex-direction: column; gap: 12px;">
+        <div style="align-self: flex-start; background: white; border: 1px solid #eee; padding: 10px 14px; border-radius: 4px 15px 15px 15px; max-width: 85%; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+            你好 {{ user.username }}！我是 Ada-Finance 助手。我可以基于当前系统日期 **{{ sim.current_virtual_date|date:"Y-m-d" }}** 为你分析行情。你想了解哪只股票？
+        </div>
+    </div>
+    
+    <div style="padding: 15px; background: white; border-top: 1px solid #eee; display: flex; gap: 10px;">
+        <input type="text" id="chat-input" class="form-control form-control-sm" placeholder="输入投资问题..." style="border-radius: 20px;">
+        <button onclick="sendMessage()" class="btn btn-info btn-sm" style="border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+            <i class="bi bi-send-fill text-white"></i>
+        </button>
+    </div>
+</div>
+
+<script>
+// 1. 开关逻辑
+function toggleChat() {
+    const win = document.getElementById('ai-chat-window');
+    const bubble = document.getElementById('ai-chat-bubble');
+    if (win.style.display === 'none' || win.style.display === '') {
+        win.style.display = 'flex';
+        bubble.style.transform = 'scale(0.9) rotate(15deg)';
+    } else {
+        win.style.display = 'none';
+        bubble.style.transform = 'scale(1) rotate(0deg)';
+    }
+}
+
+// 2. 发送逻辑
+async function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const content = document.getElementById('chat-content');
+    const text = input.value.trim();
+
+    if (!text) return;
+
+    // 添加用户气泡
+    content.innerHTML += `
+        <div style="align-self: flex-end; background: var(--accent-blue); color: white; padding: 10px 14px; border-radius: 15px 15px 4px 15px; max-width: 85%; font-size: 14px;">
+            ${text}
+        </div>
+    `;
+    input.value = '';
+    content.scrollTop = content.scrollHeight;
+
+    // 加载动画
+    const tid = "loading-" + Date.now();
+    content.innerHTML += `
+        <div id="${tid}" style="align-self: flex-start; background: #e9ecef; padding: 10px 14px; border-radius: 4px 15px 15px 15px; font-size: 14px;">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div> 正在思考...
+        </div>
+    `;
+    content.scrollTop = content.scrollHeight;
+
+    try {
+        const response = await fetch("/api/v1/ai/chat/", {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrftoken  // 直接使用了你 base.html 里定义的变量
+            },
+            body: JSON.stringify({ message: text })
+        });
+        
+        const data = await response.json();
+        document.getElementById(tid).remove();
+
+        // 渲染回复 (简单处理换行)
+        const formattedReply = data.reply.replace(/\n/g, '<br>');
+        content.innerHTML += `
+            <div style="align-self: flex-start; background: white; border: 1px solid #eee; padding: 10px 14px; border-radius: 4px 15px 15px 15px; max-width: 85%; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                ${formattedReply}
+            </div>
+        `;
+    } catch (e) {
+        document.getElementById(tid).innerHTML = `<span class="text-danger">连接 AI 失败</span>`;
+    }
+    content.scrollTop = content.scrollHeight;
+}
+
+// 绑定回车
+document.getElementById('chat-input').onkeypress = (e) => { if(e.key==='Enter') sendMessage(); };
+</script>
     
 </body>
 </html>

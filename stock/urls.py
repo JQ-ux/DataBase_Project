@@ -37,6 +37,8 @@ urlpatterns = [
     path("api/v1/trades/", views.process_transaction, name="process_transaction"),
     path("api/v1/order/cancel/<int:order_id>/", views.cancel_order, name="cancel_order"),
     path("api/v1/indicators/calculate/", views.api_calculate_custom_indicator, name="api_custom_indicator"),
+    # AI 助手 API
+    path("api/v1/ai/chat/", views.ai_chat_api, name="ai_chat_api"),
 
     # ==========================================
     # 5. Simulation Control
