@@ -1,0 +1,9 @@
+2026-04-24T12:19:52.776122Z 0 [System] [MY-015015] [Server] MySQL Server - start.
+2026-04-24T12:19:52.924558Z 0 [System] [MY-010116] [Server] C:\Program Files\MySQL\MySQL Server 9.6\bin\mysqld.exe (mysqld 9.6.0) starting as process 17100
+2026-04-24T12:19:52.924568Z 0 [System] [MY-015590] [Server] MySQL Server has access to 24 logical CPUs.
+2026-04-24T12:19:52.924575Z 0 [System] [MY-015590] [Server] MySQL Server has access to 16890322944 bytes of physical memory.
+2026-04-24T12:19:52.948852Z 0 [Warning] [MY-010075] [Server] No existing UUID has been found, so we assume that this is the first time that this server has been started. Generating a new UUID: e5b3e757-3fd7-11f1-a0fe-00155d795e71.
+2026-04-24T12:19:52.959589Z 1 [System] [MY-013576] [InnoDB] InnoDB initialization has started.
+2026-04-24T12:19:52.982290Z 1 [ERROR] [MY-012611] [InnoDB] Operating system error number 2 in a file operation.
+2026-04-24T12:19:52.984398Z 1 [ERROR] [MY-012646] [InnoDB] File .\ibdata1: 'open' returned OS error 71. Cannot continue operation
+2026-04-24T12:19:52.985400Z 1 [ERROR] [MY-012981] [InnoDB] Cannot continue operation.

@@ -1,7 +1,21 @@
 {% extends "stock/base.html" %}
 {% load static %}
-
 {% block body %}
+<!-- 添加顶部横幅 -->
+<div class="container-fluid py-2 bg-dark text-white" style="background: rgba(0, 0, 0, 0.6);">
+  <div class="d-flex justify-content-between align-items-center">
+    <h5 class="mb-0"><i class="bi bi-coin me-2"></i> StockX Pro</h5>
+    <div class="d-flex align-items-center">
+      <span class="badge bg-success me-2">LIVE</span>
+      <span class="small">专业金融交易平台</span>
+    </div>
+  </div>
+</div>
+<div class="banner-container">
+  <img src="{% static 'img/backgrounds/background-finance-1.png' %}" 
+       alt="StockX Pro Trading Dashboard"
+       class="banner-img">
+</div>
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4 bg-dark text-white p-3 rounded shadow-sm">
         <div>
@@ -22,7 +36,7 @@
 
     <div class="row g-3 mb-4">
         <div class="col-md-3">
-            <div class="card border-0 shadow-sm p-3 bg-primary text-white">
+            <div class="card card-highlight border-0 shadow-sm p-3 text-dark">
                 <small class="opacity-75 fw-bold">账户总资产 </small>
                 <h3 class="mb-0 fw-bold">${{ total_nav|floatformat:2 }}</h3>
                 <div class="progress mt-2" style="height: 4px; background: rgba(255,255,255,0.2);">
