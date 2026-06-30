@@ -37,21 +37,14 @@ urlpatterns = [
     path("api/v1/trades/", views.process_transaction, name="process_transaction"),
     path("api/v1/order/cancel/<int:order_id>/", views.cancel_order, name="cancel_order"),
     path("api/v1/indicators/calculate/", views.api_calculate_custom_indicator, name="api_custom_indicator"),
-    # AI 助手 API
-    path("api/v1/ai/chat/", views.ai_chat_api, name="ai_chat_api"),
 
     # ==========================================
     # 5. Simulation Control
     # ==========================================
     path("simulation/advance/", views.advance_simulation_date, name="advance_date"),
     path("simulation/report/", views.simulation_performance, name="simulation_performance"),
-    path("simulation/report/<int:sim_id>/", views.simulation_performance, name="simulation_performance_with_id"),
 
     # 6. Reports & Documents (New Section)
-    path("transaction/pdf/<int:transaction_id>/", views.generate_transaction_pdf, name="generate_transaction_pdf"),
 
-    # ==========================================
-    # 交易成功页面（你新加的）
-    # ==========================================
-    path("trade/success/", views.trade_success, name="trade_success"),
+    path("transaction/pdf/<int:transaction_id>/", views.generate_transaction_pdf, name="generate_transaction_pdf"),
 ]

@@ -3,20 +3,44 @@
 {% block body %}
 <!-- 添加顶部横幅 -->
 <div class="container-fluid py-2 bg-dark text-white" style="background: rgba(0, 0, 0, 0.6);">
-  <div class="d-flex justify-content-between align-items-center" style="padding-top: 50px;">
-    <h5 class="mb-0"><i class="bi bi-coin me-2"></i> StockX Pro</h5>
-    <div class="d-flex align-items-center" >
-      <span class="badge bg-success me-2">LIVE</span>
-      <span class="small">专业金融交易平台</span>
+    <div class="d-flex justify-content-between align-items-center" style="padding-top: 50px;">
+        <h5 class="mb-0"><i class="bi bi-coin me-2"></i> StockX Pro</h5>
+        <div class="d-flex align-items-center">
+            <span class="badge bg-success me-2">LIVE</span>
+            <span class="small">专业金融交易平台</span>
+        </div>
     </div>
-  </div>
 </div>
 <div class="banner-container">
-  <img src="{% static 'img/backgrounds/background-finance-1.png' %}" 
-       alt="StockX Pro Trading Dashboard"
-       class="banner-img">
+    <img src="{% static 'img/backgrounds/background-finance-1.png' %}"
+         alt="StockX Pro Trading Dashboard"
+         class="banner-img">
 </div>
 <div class="container-fluid py-4">
+    <!-- 修复：组合名称 + 动态风格标签 + 正确日期 -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 p-3 rounded shadow-sm bg-light">
+        <div class="d-flex align-items-center gap-3">
+            <h5 class="mb-0 fw-bold">我的投资组合：{{ portfolio_name|default:"稳健成长组合" }}</h5>
+
+            {% if sim.investment_style == 'conservative' %}
+            <span class="badge bg-secondary">保守配置</span>
+            <span class="badge bg-info">低风险</span>
+            {% elif sim.investment_style == 'moderate' %}
+            <span class="badge bg-primary">均衡配置</span>
+            <span class="badge bg-info">中低风险</span>
+            {% elif sim.investment_style == 'aggressive' %}
+            <span class="badge bg-danger">激进配置</span>
+            <span class="badge bg-warning">高风险</span>
+            {% else %}
+            <span class="badge bg-secondary">均衡配置</span>
+            <span class="badge bg-info">中低风险</span>
+            {% endif %}
+        </div>
+        <div class="text-muted small">
+            组合成立日期：{{ sim.start_date|date:"Y-m-d" }}
+        </div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-4 bg-dark text-white p-3 rounded shadow-sm">
         <div>
             <span class="badge bg-primary me-2">LIVE</span>
@@ -62,8 +86,8 @@
             <div class="card border-0 shadow-sm p-3">
                 <small class="text-muted fw-bold text-uppercase">当前总盈亏</small>
                 <h3 class="mb-0 {% if total_profit >= 0 %}text-danger{% else %}text-success{% endif %}">
-                    {{ total_profit|floatformat:2 }} 
-                    <small class="fs-6">({{ profit_rate }}%)</small>
+                    {{ total_profit|floatformat:2 }}
+                    <small class="fs-6">({{ profit_rate|default:"0.00"|floatformat:2 }}%)</small>
                 </h3>
             </div>
         </div>
@@ -85,7 +109,7 @@
             <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-search text-info me-2"></i>市场探索</h5>
-                    
+
                     <div class="d-flex align-items-center">
                         <div class="dropdown me-2">
                             <button class="btn btn-sm btn-outline-primary dropdown-toggle fw-bold" type="button" id="industryDropdown" data-bs-toggle="dropdown">
@@ -142,10 +166,46 @@
                 </div>
             </div>
 
+            <!-- 猜你喜欢股票卡片模块 → 已修复 % 号、涨跌幅、颜色 -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-0 py-3">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-lightbulb-fill text-warning me-2"></i>猜你喜欢</h5>
+                    <small class="text-muted">根据持仓风格智能推荐潜力个股</small>
+                </div>
+                <div class="row g-3 p-3">
+                    {% for stock in recommended_stocks %}
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100 border-0 bg-light hover-shadow">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <span class="badge bg-dark text-white">{{ stock.symbol }}</span>
+                                    <span class="fw-bold text-primary fs-6">${{ stock.price|floatformat:2 }}</span>
+                                </div>
+                                <h6 class="fw-bold mb-1 text-truncate">{{ stock.name }}</h6>
+                                <small class="text-muted d-block mb-2">{{ stock.industry.name|default:"未知行业" }}</small>
+                                <div class="d-flex justify-content-between align-items-center mt-2">
+                                    <span class="fw-semibold {% if stock.price_change >= 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {% if stock.price_change >= 0 %}+{% endif %}{{ stock.price_change|default:"0.00"|floatformat:2 }}%
+                                    </span>
+                                    <a href="{% url 'stock_detail' stock.symbol %}" class="btn btn-sm btn-outline-primary px-2 py-0">
+                                        立即交易
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="col-12 text-center py-5 text-muted">
+                        暂无匹配推荐股票，多交易系统将为你精准匹配
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-briefcase me-2"></i>当前持仓</h5>
-                    <a href="{% url 'portfolio' %}" class="btn btn-sm btn-link text-decoration-none">查看深度报告 →</a>
+                    <a href="{% url 'simulation_performance_with_id' sim_id=sim.id %}" class="btn btn-sm btn-link text-decoration-none">查看深度报告 →</a>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
@@ -183,8 +243,8 @@
                     </table>
                 </div>
             </div>
-        </div> 
-            
+        </div>
+
 
         <div class="col-lg-4">
             <div class="card border-0 shadow-sm mb-4">
@@ -246,7 +306,8 @@
 {% endblock %}
 
 {% block scripts %}
-{{ block.super }}<script>
+{{ block.super }}
+<script>
     document.addEventListener('DOMContentLoaded', function() {
         const ctx = document.getElementById('performanceChart').getContext('2d');
         const labels = {{ chart_labels_json|safe }};

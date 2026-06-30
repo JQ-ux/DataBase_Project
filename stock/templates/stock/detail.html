@@ -5,13 +5,27 @@
 
 <style>
     /* 盘口行悬停效果 */
-    .depth-row { transition: all 0.2s; cursor: pointer; }
-    .depth-row:hover { background-color: rgba(0,0,0,0.08) !important; transform: scale(1.01); }
-    .x-small { font-size: 0.75rem; }
+    .depth-row {
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+
+        .depth-row:hover {
+            background-color: rgba(0,0,0,0.08) !important;
+            transform: scale(1.01);
+        }
+
+    .x-small {
+        font-size: 0.75rem;
+    }
     /* 自定义蓝色线条 */
-    .accent-line { border-left: 5px solid #3498db !important; }
+    .accent-line {
+        border-left: 5px solid #3498db !important;
+    }
     /* 粘性侧边栏位置微调 */
-    .sticky-panel { top: 20px; }
+    .sticky-panel {
+        top: 20px;
+    }
 </style>
 
 <div class="container mt-4" style="padding-top: 70px;">
@@ -25,10 +39,9 @@
                     </ol>
                 </nav>
                 <h1 class="fw-bold mb-0 text-dark">
-                    {{ company.symbol }} 
+                    {{ company.symbol }}
                     <span class="fs-4 text-muted fw-normal">| {{ company.full_name }}</span>
-                    <!-- 插入图片 -->
-                    <img src="{% static 'img/companies/'|add:company.symbol|lower|add:'.png' %}" 
+                    <img src="{% static 'img/companies/'|add:company.symbol|lower|add:'.png' %}"
                          alt="{{ company.full_name }} logo"
                          class="company-logo">
                 </h1>
@@ -57,7 +70,9 @@
                                 <thead class="table-light">
                                     <tr><th colspan="3" class="text-center text-danger py-2">卖盘 (ASK)</th></tr>
                                     <tr class="x-small text-muted text-uppercase">
-                                        <th class="ps-3">层级</th><th>价格</th><th class="text-end pe-3">数量</th>
+                                        <th class="ps-3">层级</th>
+                                        <th>价格</th>
+                                        <th class="text-end pe-3">数量</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -78,7 +93,9 @@
                                 <thead class="table-light">
                                     <tr><th colspan="3" class="text-center text-success py-2">买盘 (BID)</th></tr>
                                     <tr class="x-small text-muted text-uppercase">
-                                        <th class="ps-3">层级</th><th>价格</th><th class="text-end pe-3">数量</th>
+                                        <th class="ps-3">层级</th>
+                                        <th>价格</th>
+                                        <th class="text-end pe-3">数量</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -138,8 +155,8 @@
                     <div class="d-flex align-items-center">
                         <div class="input-group input-group-sm" style="width: 350px;">
                             <span class="input-group-text bg-light text-muted x-small">f(x)=</span>
-                            <input type="text" id="custom-formula-input" class="form-control" 
-                                   placeholder="e.g. net_income / total_revenue" 
+                            <input type="text" id="custom-formula-input" class="form-control"
+                                   placeholder="e.g. net_income / total_revenue"
                                    value="net_income / total_assets">
                             <button class="btn btn-primary" type="button" id="btn-calculate-formula">
                                 <i class="bi bi-play-fill"></i>
@@ -177,18 +194,18 @@
             <div class="card shadow-sm border-0 sticky-panel">
                 <div class="card-body p-4">
                     <h5 class="fw-bold mb-4">创建委托单</h5>
-                    
+
                     <form id="transactionForm" method="post">
                         {% csrf_token %}
                         <input type="hidden" name="sim_id" value="{{ sim.id }}">
                         <input type="hidden" name="symbol" value="{{ company.symbol }}">
-                        
+
                         <div class="mb-3">
                             <label class="form-label small fw-bold text-muted">委托价格 (LIMIT)</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-2 border-end-0">¥</span>
-                                <input type="number" step="0.01" name="price" id="inputPrice" 
-                                       class="form-control form-control-lg border-2" 
+                                <input type="number" step="0.01" name="price" id="inputPrice"
+                                       class="form-control form-control-lg border-2"
                                        placeholder="{{ current_price|floatformat:2 }}" required>
                             </div>
                         </div>
@@ -196,7 +213,7 @@
                         <div class="mb-4">
                             <label class="form-label small fw-bold text-muted">委托数量 (QTY)</label>
                             <div class="input-group">
-                                <input type="number" name="quantity" class="form-control form-control-lg border-2" 
+                                <input type="number" name="quantity" class="form-control form-control-lg border-2"
                                        placeholder="100" min="1" required>
                                 <span class="input-group-text bg-light border-2 border-start-0">股</span>
                             </div>
@@ -241,69 +258,79 @@
         }
     }
 
-    // 2. 核心交易处理逻辑 (优雅弹窗版)
-    function handleTrade(side) {
+    // 2. 带确认弹窗的优雅交易逻辑（你要的功能）
+    async function handleTrade(side) {
         const form = document.getElementById('transactionForm');
-        
-        // 验证表单填写
         if (!form.reportValidity()) return;
+
+        const price = parseFloat(form.price.value);
+        const qty = parseInt(form.quantity.value);
+        const amount = price * qty;
+        const fee = Math.max(5, amount * 0.0005);
+        const cash = {{ sim.available_cash }};
+        const balance = side === 'BUY' ? cash - amount - fee : cash + amount - fee;
+        const posChange = side === 'BUY' ? `+${qty} 股` : `-${qty} 股`;
+
+        // 交易确认弹窗（显示你要的4项信息）
+        const confirmResult = await Swal.fire({
+            title: '交易确认',
+            html: `
+                <div class='text-start px-3'>
+                    <p class='mb-1'><strong>预计成交金额：</strong> ¥${amount.toFixed(2)}</p>
+                    <p class='mb-1'><strong>手续费：</strong> ¥${fee.toFixed(2)}</p>
+                    <p class='mb-1'><strong>交易后余额：</strong> ¥${balance.toFixed(2)}</p>
+                    <p class='mb-1'><strong>持仓变化：</strong> ${posChange}</p>
+                </div>
+            `,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '确认交易',
+            cancelButtonText: '取消',
+            confirmButtonColor: '#198754',
+            cancelButtonColor: '#6c757d'
+        });
+
+        if (!confirmResult.isConfirmed) return;
+
+        // 加载中
+        Swal.fire({
+            title: '正在提交...',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
 
         const formData = new FormData(form);
         formData.append('type', side);
 
-        // 弹出加载框
-        Swal.fire({
-            title: '正在提交委托...',
-            text: '请稍候，正在为您撮合交易',
-            allowOutsideClick: false,
-            didOpen: () => { Swal.showLoading(); }
-        });
-
-        // 异步请求后端
         fetch("{% url 'process_transaction' %}", {
             method: 'POST',
             body: formData,
-            headers: {
-                'X-CSRFToken': '{{ csrf_token }}'
-            }
+            headers: { 'X-CSRFToken': '{{ csrf_token }}' }
         })
-        .then(response => response.json())
+        .then(res => res.json())
         .then(data => {
             if (data.success) {
-                // 成功提示
+                // 交易成功动画 + 提示
                 Swal.fire({
                     icon: 'success',
-                    title: '委托已受理',
-                    text: data.message || '您的订单已成功成交！',
-                    confirmButtonText: '确定',
-                    timer: 2000
-                }).then(() => {
-                    location.reload(); // 成功后刷新页面
-                });
+                    title: '✅ 交易已完成',
+                    text: '您的委托已成功成交',
+                    timer: 2000,
+                    showConfirmButton: false
+                }).then(() => location.reload());
             } else {
-                // 失败提示 (例如余额不足、超出涨跌停)
-                Swal.fire({
-                    icon: 'error',
-                    title: '交易受阻',
-                    text: data.message || data.error || '未知错误，请检查输入',
-                    confirmButtonText: '返回修改'
-                });
+                Swal.fire('失败', data.message || data.error, 'error');
             }
         })
-        .catch(error => {
-            console.error('Fetch error:', error);
-            Swal.fire({
-                icon: 'error',
-                title: '网络连接失败',
-                text: '无法连接到交易服务器，请稍后再试。'
-            });
+        .catch(err => {
+            Swal.fire('错误', '网络异常', 'error');
         });
     }
 
     // 3. 财务图表逻辑
     const chartLabels = {{ chart_dates_json|safe }};
     const ctx = document.getElementById('ratioChart').getContext('2d');
-    
+
     let ratioChart = new Chart(ctx, {
         type: 'line',
         data: { labels: chartLabels, datasets: [] },

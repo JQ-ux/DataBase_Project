@@ -5,7 +5,6 @@ from django.core.exceptions import ValidationError
 from decimal import Decimal
 from django.utils import timezone
 import uuid
-
 # ==========================================
 # 0. Global Constants
 # ==========================================
@@ -30,7 +29,7 @@ class Industry(models.Model):
     Industry Model
     """
     name = models.CharField(max_length=100, unique=True)
-    sector = models.CharField(max_length=100, blank=True, null=True) 
+    sector = models.CharField(max_length=100, blank=True, null=True) # 对应你看到的 Sector: Technology
     description = models.TextField(blank=True, null=True)
 
     def __str__(self):
@@ -140,78 +139,84 @@ class Simulation(models.Model):
         CLOSED = 'CLOSED', 'Closed'
 
     class Mode(models.TextChoices):
-        LIVE = 'LIVE', 'Live Multiplayer'
+        LIVE = 'LIVE', 'Live Multiplayer'  # Now implies the shared exchange mode
         BACKTEST = 'BACKTEST', 'Private Backtest'
 
-    # ====================== 新增：组合名称 + 投资风格 ======================
-    class InvestmentStyle(models.TextChoices):
-        CONSERVATIVE = 'CONSERVATIVE', '保守型'
-        MODERATE = 'MODERATE', '稳健型'
-        AGGRESSIVE = 'AGGRESSIVE', '激进型'
-
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='simulations')
-    
-    # 新增字段
-    name = models.CharField(max_length=100, default="我的投资组合")
-    investment_style = models.CharField(
-        max_length=20,
-        choices=InvestmentStyle.choices,
-        default=InvestmentStyle.MODERATE,
-        verbose_name="投资风格"
-    )
-
+    name = models.CharField(max_length=100)
     start_date = models.DateField()
+    
+    # This now syncs with GlobalSimulationState.current_global_date for LIVE mode
     current_virtual_date = models.DateField(default=timezone.now)
+
     initial_cash = models.DecimalField(max_digits=20, decimal_places=4)
     available_cash = models.DecimalField(max_digits=20, decimal_places=4, default=ZERO)
+
+    
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
     mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.LIVE)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
+        """
+        Overrides the save method to automate ledger initialization.
+        When a new simulation is created, we set available_cash = initial_cash
+        and create an initial cash flow record for audit purposes.
+        """
+        # 1. Check if this is a new instance creation
         is_new = self._state.adding 
+
         if is_new:
+            # 2. Sync financial fields with initial_cash on creation
             self.available_cash = self.initial_cash
+            
+
+        # 3. Save the Simulation instance first to get an ID
         super().save(*args, **kwargs)
+
+        # 4. Automatically record the initial deposit in the Cash Flow ledger
         if is_new:
+            # Local import to prevent circular dependency
             from .models import Simulation_Cash_Flow
+            
             Simulation_Cash_Flow.objects.create(
                 sim=self,
                 change_type=Simulation_Cash_Flow.FlowType.INIT,
                 before_balance=Decimal('0.0000'),
                 amount=self.initial_cash,
                 after_balance=self.initial_cash,
+                # Unique request_id for auditing purposes
                 request_id=f"AUTO_INIT_{self.id}_{int(timezone.now().timestamp())}"
             )
 
     @property
     def total_fees(self):
+        """
+        Aggregates all recorded transaction fees from the cash flow ledger.
+        This helps reconcile the gap between Floating PnL and NAV.
+        """
         from .models import Simulation_Cash_Flow
+        # Summing all negative amounts marked as 'FEE'
         result = self.cash_flows.filter(change_type=Simulation_Cash_Flow.FlowType.FEE).aggregate(models.Sum('amount'))['amount__sum']
         return abs(result) if result else Decimal('0.0000')
-    
     @property
     def total_realized_pnl(self):
         result = self.transactions.aggregate(models.Sum('realized_pnl'))['realized_pnl__sum']
         return result if result else Decimal('0.0000')
-    
     @property
     def market_value(self):
+
         from .models import Simulation_Holding, DailyPrice
         total = ZERO
         holdings = self.holdings.all()
         for h in holdings:
             price_rec = DailyPrice.objects.filter(
                 symbol=h.symbol, 
-                trade_date__lte=self.current_virtual_date
+            trade_date__lte=self.current_virtual_date
             ).order_by('-trade_date').first()
             if price_rec:
                 total += h.quantity * price_rec.close_price
         return total
-
-    # 用于前端显示中文风格
-    def get_investment_style_display(self):
-        return dict(self.InvestmentStyle.choices)[self.investment_style]
 
     class Meta:
         constraints = [
@@ -223,6 +228,9 @@ class Simulation(models.Model):
 
 
 class TradeOrder(models.Model):
+    """
+    Order Book for peer-to-peer trading.
+    """
     class OrderSide(models.TextChoices):
         BUY = 'BUY', 'Buy'
         SELL = 'SELL', 'Sell'
@@ -244,8 +252,9 @@ class TradeOrder(models.Model):
     filled_quantity = models.IntegerField(default=0)
     
     status = models.CharField(max_length=10, choices=OrderStatus.choices, default=OrderStatus.FILLED)
-    order_date = models.DateField()
+    order_date = models.DateField() # The virtual date when the order was placed
     created_at = models.DateTimeField(auto_now_add=True)
+   
     avg_cost_snapshot = models.DecimalField(
         max_digits=18, 
         decimal_places=4, 
@@ -258,25 +267,25 @@ class TradeOrder(models.Model):
         indexes = [
             models.Index(fields=['symbol', 'status', 'side', 'price']),
         ]
-
 # ==========================================
 # 4. Trading & Auditing
 # ==========================================
 class Simulation_Transaction(models.Model):
     voucher_no = models.CharField(
         max_length=64, 
+       
         db_index=True, 
         null=True, 
         blank=True,
         verbose_name="凭证编号"
     )
     
+
     digital_signature = models.CharField(
         max_length=100, 
         null=True, 
         blank=True
     )
-
     class TransType(models.TextChoices):
         BUY = 'BUY', 'Buy'
         SELL = 'SELL', 'Sell'
@@ -296,11 +305,16 @@ class Simulation_Transaction(models.Model):
     fees = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.0000'))
 
     def save(self, *args, **kwargs):
+        
         if not self.voucher_no:
+            
             count = Simulation_Transaction.objects.filter(sim=self.sim).count()
             order_number = count + 1
+            
+            
             self.voucher_no = f"TX-{self.sim.id}-{order_number:04d}"
             
+        
         if not self.digital_signature:
             self.digital_signature = uuid.uuid4().hex
             
@@ -320,7 +334,7 @@ class Simulation_Cash_Flow(models.Model):
     sim = models.ForeignKey(Simulation, on_delete=models.CASCADE, related_name='cash_flows')
     change_type = models.CharField(max_length=10, choices=FlowType.choices)
     before_balance = models.DecimalField(max_digits=20, decimal_places=4)
-    amount = models.DecimalField(max_digits=20, decimal_places=4)
+    amount = models.DecimalField(max_digits=20, decimal_places=4) # Negative for Buy/Fee
     after_balance = models.DecimalField(max_digits=20, decimal_places=4)
     transaction = models.ForeignKey(Simulation_Transaction, on_delete=models.SET_NULL, null=True, blank=True)
     request_id = models.CharField(max_length=64, unique=True, null=True)
@@ -355,6 +369,6 @@ class Simulation_NAV_History(models.Model):
     cash = models.DecimalField(max_digits=20, decimal_places=4)
     market_value = models.DecimalField(max_digits=20, decimal_places=4)
     created_at = models.DateTimeField(auto_now_add=True)
-    
     def __str__(self):
+        
         return f"{self.sim.name} - {self.record_date}"

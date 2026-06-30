@@ -1,0 +1,50 @@
+{% extends "stock/base.html" %}
+{% load static %}
+{% block body %}
+
+<!-- 🔥 已修复：加了 mt-5 上边距，标题再也不会被导航栏挡住 -->
+<div class="container py-4 mt-5">
+    <h1>📊 模拟账户绩效报告</h1>
+    <hr>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h3>账户信息</h3>
+            <p>账户名称：{{ sim.name }}</p>
+            <p>报告日期：{{ stats.report_date }}</p>
+            <p>总资产：${{ stats.total_nav }}</p>
+            <p>可用现金：${{ stats.cash }}</p>
+            <p>收益率：{{ stats.roi }}%</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h3>持仓明细</h3>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>股票代码</th>
+                        <th>持仓数量</th>
+                        <th>持仓成本</th>
+                        <th>当前价格</th>
+                        <th>市值</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for h in holdings %}
+                    <tr>
+                        <td>{{ h.symbol.symbol }}</td>
+                        <td>{{ h.quantity }}</td>
+                        <td>${{ h.avg_cost }}</td>
+                        <td>${{ h.current_price }}</td>
+                        <td>${{ h.market_value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

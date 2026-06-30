@@ -19,7 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.decorators import user_passes_test
-from django.shortcuts import render, HttpResponseRedirect, get_object_or_404
+from django.shortcuts import render, HttpResponseRedirect, get_object_or_404  
 from .models import Simulation_Cash_Flow
 import ast
 import operator
@@ -33,15 +33,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from django.http import HttpResponse
 import io
 import uuid
-from agents.brain import FinancialBrain
 
-
-try:
-    print("--- [System] 正在初始化 Ada-Finance AI 引擎... ---")
-    ada_brain = FinancialBrain(model_name="qwen2.5:7b")
-except Exception as e:
-    print(f"--- [Warning] AI 引擎初始化失败: {e} ---")
-    ada_brain = None
 
 FONT_PATH = r"C:\Users\24300\Desktop\Stock\fonts\msyh.ttc"
 if os.path.exists(FONT_PATH):
@@ -61,24 +53,24 @@ COMMISSION_RATE = Decimal('0.0003') # 0.03% Transaction Fee
 def safe_eval_formula(formula_str, context):
     """
     Safely evaluates a mathematical formula string using Abstract Syntax Trees (AST).
-
+    
     Args:
         formula_str (str): The raw string from the user (e.g., "net_income / total_revenue").
-        context (dict): A dictionary mapping variable names to their numeric values
+        context (dict): A dictionary mapping variable names to their numeric values 
                        (e.g., {'net_income': 100, 'total_revenue': 500}).
-
+    
     Returns:
         Decimal: The result of the calculation.
-
+    
     Raises:
         Exception: If the formula contains illegal operations or undefined variables.
     """
     # Define allowed operators for calculation
     # This acts as a whitelist to prevent execution of malicious code
     allowed_operators = {
-        ast.Add: operator.add,
-        ast.Sub: operator.sub,
-        ast.Mult: operator.mul,
+        ast.Add: operator.add, 
+        ast.Sub: operator.sub, 
+        ast.Mult: operator.mul, 
         ast.Div: operator.truediv,
         ast.USub: operator.neg  # Supports negative numbers like -5
     }
@@ -87,13 +79,13 @@ def safe_eval_formula(formula_str, context):
         # Case 1: The node is a literal number (e.g., 100 or 0.05)
         if isinstance(node, ast.Num):
             return Decimal(str(node.n))
-
+        
         # Case 2: The node is a binary operation (e.g., a + b, a / b)
         elif isinstance(node, ast.BinOp):
             left_val = eval_node(node.left)
             right_val = eval_node(node.right)
             op_type = type(node.op)
-
+            
             if op_type in allowed_operators:
                 # Case 2.1: Robust Division handling
                 if op_type == ast.Div:
@@ -104,7 +96,7 @@ def safe_eval_formula(formula_str, context):
                     return left_val / right_val
                 return allowed_operators[op_type](left_val, right_val)
             raise ValueError(f"Operator {op_type.__name__} is not allowed.")
-
+            
         # Case 3: The node is a unary operation (e.g., -income)
         elif isinstance(node, ast.UnaryOp):
             operand_val = eval_node(node.operand)
@@ -120,7 +112,7 @@ def safe_eval_formula(formula_str, context):
             if val is None:
                 raise NameError(f"Variable '{node.id}' is not found in financial data.")
             return Decimal(str(val))
-
+        
         else:
             raise TypeError(f"Unsupported syntax: {type(node).__name__}")
 
@@ -133,7 +125,7 @@ def safe_eval_formula(formula_str, context):
     except Exception as e:
         # Catch and re-raise with a clear message for the frontend
         raise Exception(f"Formula Error: {str(e)}")
-
+    
 
 def quantize_4(value):
     return Decimal(value).quantize(PRECISION_4, rounding=ROUND_HALF_UP)
@@ -161,10 +153,10 @@ def calculate_nav_optimized(sim, target_date):
     """
     Production-grade NAV calculation optimized for RDBMS.
     Formula: Available Cash + Frozen Buying Cash + Current Market Value
-
+    
     This implementation replaces Python loops with Database Aggregations.
     """
-
+    
     # --- 1. Subquery: Get the latest close price for each symbol before target_date ---
     # This prevents loading thousands of historical price rows into memory.
     latest_price_subquery = DailyPrice.objects.filter(
@@ -239,7 +231,7 @@ def register_view(request):
         d = request.POST
         if d['password'] != d['confirmation']:
             return render(request, "stock/register.html", {"message": "Passwords mismatch."})
-
+        
         try:
             with transaction.atomic():
                 # 1. Fetch Global Simulation State to sync the start date
@@ -251,7 +243,7 @@ def register_view(request):
                         current_global_date=initial_date,
                         is_market_open=True
                     )
-
+                
                 # The "Time Machine" entry point for this user
                 shared_virtual_date = global_state.current_global_date
 
@@ -262,12 +254,11 @@ def register_view(request):
                 user.gender = d.get('gender', 'Other')
                 user.account_balance = INITIAL_BALANCE
                 user.save()
-
+                
                 # 3. Create the Simulation instance synced to Global Clock
                 new_sim = Simulation.objects.create(
                     user=user,
-                    name=f"标准阿尔法策略 - {user.username}",
-                    investment_style=Simulation.InvestmentStyle.MODERATE,
+                    name=f"Standard Alpha Strategy - {user.username}",
                     start_date=shared_virtual_date,
                     current_virtual_date=shared_virtual_date,
                     initial_cash=INITIAL_BALANCE,
@@ -285,11 +276,11 @@ def register_view(request):
 
             login(request, user)
             return HttpResponseRedirect(reverse("index"))
-
+            
         except Exception as e:
             # It's better to log the exception here for debugging
             return render(request, "stock/register.html", {"message": str(e)})
-
+            
     return render(request, "stock/register.html")
 import traceback
 from django.http import HttpResponse
@@ -341,23 +332,6 @@ def logout_view(request):
 # 3. MARKET EXPLORER (ER: Company, Financials)
 # ==========================================
 
-# ====================== ✅ 猜你喜欢：根据投资风格推荐股票 ======================
-def get_recommended_stocks(sim):
-    style = sim.investment_style
-    if style == "CONSERVATIVE":
-        return Company.objects.filter(
-            market_cap__gte=500, trailing_pe__lte=20
-        ).order_by('-market_cap')[:6]
-    elif style == "MODERATE":
-        return Company.objects.filter(
-            market_cap__gte=200, trailing_pe__gte=15, trailing_pe__lte=30
-        ).order_by('-market_cap')[:6]
-    elif style == "AGGRESSIVE":
-        return Company.objects.filter(
-            market_cap__lte=200, trailing_pe__gte=30
-        ).order_by('-market_cap')[:6]
-    return Company.objects.all()[:6]
-
 @login_required
 def index(request):
     """
@@ -368,7 +342,7 @@ def index(request):
     global_state = GlobalSimulationState.objects.first()
     if not global_state:
         return HttpResponse("系统错误：请联系管理员初始化全局时钟。")
-
+    
     virtual_today = global_state.current_global_date
     if not global_state:
         # Emergency fallback if no state exists in DB
@@ -377,19 +351,18 @@ def index(request):
             current_global_date=initial_date,
             is_market_open=True
         )
-
+    
     virtual_today = global_state.current_global_date
 
     # 2. Fetch the primary simulation account for the current user
     user_sims = Simulation.objects.filter(user=request.user).order_by('-created_at')
     active_sim = user_sims.first()
-
+    
     # 3. Lazy Initialization: Create a simulation if none exists
     if not active_sim:
         active_sim = Simulation.objects.create(
             user=request.user,
-            name=f"阿尔法策略 - {request.user.username}",
-            investment_style=Simulation.InvestmentStyle.MODERATE,
+            name=f"Alpha Strategy - {request.user.username}",
             start_date=virtual_today,
             current_virtual_date=virtual_today, # Sync with global clock
             initial_cash=INITIAL_BALANCE,
@@ -397,10 +370,10 @@ def index(request):
         )
         # Create the initial record for the performance chart
         Simulation_NAV_History.objects.create(
-            sim=active_sim,
+            sim=active_sim, 
             record_date=virtual_today,
-            nav=INITIAL_BALANCE,
-            cash=INITIAL_BALANCE,
+            nav=INITIAL_BALANCE, 
+            cash=INITIAL_BALANCE, 
             market_value=Decimal('0.00')
         )
 
@@ -425,13 +398,13 @@ def index(request):
     # Slice to top 10 and process prices based on virtual timeline
     popular_companies = companies_qs[:10]
     processed_stocks = []
-
+    
     for comp in popular_companies:
         price_rec = DailyPrice.objects.filter(
             symbol=comp,
             trade_date__lt=virtual_today
         ).order_by('-trade_date').first()
-
+        
         if price_rec:
             processed_stocks.append({
                 "symbol": comp.symbol,
@@ -441,14 +414,14 @@ def index(request):
     # 5. Portfolio Accounting: Calculate NAV and Current Holdings
     # This now uses the global virtual_today for consistent valuation
     total_nav, total_mkt_val = calculate_nav_optimized(active_sim, virtual_today)
-
+    
     raw_holdings = Simulation_Holding.objects.filter(sim=active_sim).exclude(quantity=0).select_related('symbol')
     processed_holdings = []
-
+    
     for h in raw_holdings:
         price_rec = get_market_price(h.symbol, virtual_today)
         exec_price = price_rec.close_price if price_rec else h.symbol.current_price
-
+        
         processed_holdings.append({
             "symbol": h.symbol,
             "quantity": h.quantity,
@@ -464,31 +437,13 @@ def index(request):
     chart_data = [float(record.nav) for record in nav_history_qs]
     recent_transactions = Simulation_Transaction.objects.filter(sim=active_sim).order_by('-trade_date', '-created_at')[:5]
 
-    # ====================== ✅ 猜你喜欢：补充价格、涨跌幅 ======================
-    recommended_stocks = []
-    raw_recommended = get_recommended_stocks(active_sim)
-    for stock in raw_recommended:
-        latest_price = DailyPrice.objects.filter(
-            symbol=stock, trade_date__lt=virtual_today
-        ).order_by('-trade_date').first()
-        if latest_price:
-            change = ((latest_price.close_price - latest_price.open_price) / latest_price.open_price * 100)
-        else:
-            change = 0
-        recommended_stocks.append({
-            "symbol": stock.symbol,
-            "name": stock.full_name,
-            "industry": stock.industry,
-            "price": latest_price.close_price if latest_price else 0,
-            "price_change": round(change, 2),
-        })
 
     # 7. Render Response with full context
     context = {
         "sim": active_sim,
         "holdings": processed_holdings,
         "popular_stocks": processed_stocks,
-        "industries": all_industries,
+        "industries": all_industries,               
         "current_industry": selected_industry_id,
         "total_nav": total_nav,
         "total_profit": total_nav - active_sim.initial_cash,
@@ -498,12 +453,8 @@ def index(request):
         "virtual_today": virtual_today, # Passed from global state
         "is_market_open": global_state.is_market_open,
         "recent_transactions": recent_transactions,
-        "recommended_stocks": recommended_stocks,
-        "investment_style": active_sim.get_investment_style_display(),
-        # ✅ 修复：组合成立日期
-        "portfolio_create_date": active_sim.start_date.strftime("%Y-%m-%d") if active_sim.start_date else "2026-03-02",
     }
-
+    
     return render(request, "stock/index.html", context)
 
 
@@ -525,13 +476,13 @@ def api_search_companies(request):
     query = request.GET.get('q', '').strip()
     if len(query) < 1:
         return JsonResponse({'results': []})
-
-
+    
+    
     # Use select_related to join Industry table and reduce DB hits
     companies = Company.objects.filter(
         Q(symbol__icontains=query) | Q(full_name__icontains=query)
     ).select_related('industry')[:6]
-
+    
     results = []
     for c in companies:
         results.append({
@@ -539,7 +490,7 @@ def api_search_companies(request):
             'full_name': c.full_name,
             'industry': c.industry.name if c.industry else "N/A",
         })
-
+    
     return JsonResponse({'results': results})
 
 def api_search(request):
@@ -548,9 +499,9 @@ def api_search(request):
     Ensures all users see the same market prices regardless of their individual sim state.
     """
     term = request.GET.get('q', '').strip().upper()
-    if len(term) < 1:
+    if len(term) < 1: 
         return JsonResponse([], safe=False)
-
+    
     # 1. Get the GLOBAL simulation date (The Master Clock)
     global_state = GlobalSimulationState.objects.first()
     if global_state:
@@ -563,26 +514,26 @@ def api_search(request):
     matches = Company.objects.filter(
         Q(symbol__icontains=term) | Q(full_name__icontains=term)
     )[:SEARCH_LIMIT]
-
+    
     results = []
     for m in matches:
         # 3. Fetch historical price based on the GLOBAL reference date
         price_rec = DailyPrice.objects.filter(
             symbol=m,
-            trade_date__lt=reference_date
+            trade_date__lt=reference_date 
         ).order_by('-trade_date').first()
-
+        
         # If no price exists for this company at this point in time, skip it
         if not price_rec:
-            continue
+            continue 
 
         results.append({
-            "symbol": m.symbol,
-            "name": m.full_name,
+            "symbol": m.symbol, 
+            "name": m.full_name, 
             "price": str(price_rec.close_price),
             "pe": str(m.trailing_pe)
         })
-
+        
     return JsonResponse({"results": results})
 
 
@@ -625,7 +576,7 @@ def process_transaction(request):
 
         if error_fields:
             return JsonResponse({
-                "success": False,
+                "success": False, 
                 "error": f"Invalid parameters or price. Check fields: {', '.join(error_fields)}",
                 "debug_payload": {
                     "sim_id": sim_id,
@@ -642,13 +593,13 @@ def process_transaction(request):
             global_state = GlobalSimulationState.objects.select_for_update().first()
             if not global_state or not global_state.is_market_open:
                 return JsonResponse({"success": False, "error": "Market is currently closed."})
-
+            
             virtual_today = global_state.current_global_date
 
             # 3. Lock Simulation record
             sim = Simulation.objects.select_for_update().filter(
-                id=sim_id,
-                user=request.user,
+                id=sim_id, 
+                user=request.user, 
                 status='ACTIVE'
             ).first()
 
@@ -664,21 +615,21 @@ def process_transaction(request):
             # 5. God's Price Boundary Validation (Refined for P2P Visibility)
             # Use TODAY'S real market boundaries to ensure the order is physically possible.
             today_price_rec = DailyPrice.objects.filter(
-                symbol=company,
+                symbol=company, 
                 trade_date=virtual_today  # Use the actual simulation date
             ).first()
-
+            
             if not today_price_rec:
                 return JsonResponse({"success": False, "error": "MARKET_DATA_MISSING"})
-
+            
             # Rejection logic: The price must be within [Low, High]
             if not (today_price_rec.low_price <= order_price <= today_price_rec.high_price):
                 return JsonResponse({
-                    "success": False,
+                    "success": False, 
                     "error": "UNTRADABLE_PRICE",
                     "message": f"Price {order_price} out of range [{today_price_rec.low_price} - {today_price_rec.high_price}]"
                 })
-
+            
             # 6. Asset Freezing (Deduction)
             subtotal = order_price * qty
             estimated_fee = quantize_4(subtotal * COMMISSION_RATE)
@@ -688,13 +639,13 @@ def process_transaction(request):
                 total_required = subtotal + estimated_fee
                 if sim.available_cash < total_required:
                     return JsonResponse({"success": False, "error": "Insufficient cash."})
-
+                
                 sim.available_cash -= total_required
                 sim.save()
 
                 # Sync Holding: Update quantity and recalculate average cost
                 holding, created = Simulation_Holding.objects.get_or_create(
-                    sim=sim, symbol=company,
+                    sim=sim, symbol=company, 
                     defaults={'quantity': 0, 'avg_cost': ZERO}
                 )
                 total_cost = (holding.quantity * holding.avg_cost) + subtotal + estimated_fee
@@ -706,9 +657,9 @@ def process_transaction(request):
                 holding = Simulation_Holding.objects.filter(sim=sim, symbol=company).first()
                 if not holding or holding.quantity < qty:
                     return JsonResponse({"success": False, "error": "Insufficient shares."})
-
+                
                 avg_cost_at_order = holding.avg_cost
-
+                
                 # Instant Liquidation: Add net proceeds to cash
                 net_proceeds = subtotal - estimated_fee
                 sim.available_cash += net_proceeds
@@ -809,7 +760,7 @@ def cancel_order(request):
             return JsonResponse({"success": False, "error": "Order ID is required."})
 
         with transaction.atomic():
-            # 1. Lock the order and verify ownership.
+            # 1. Lock the order and verify ownership. 
             # Crucial: Allow cancellation for both PENDING and PARTIAL.
             order = TradeOrder.objects.select_for_update().filter(
                 id=order_id,
@@ -823,7 +774,7 @@ def cancel_order(request):
             sim = order.sim
             # Calculate what is left to be returned
             remaining_qty = order.quantity - order.filled_quantity
-
+            
             if remaining_qty <= 0:
                 return JsonResponse({"success": False, "error": "Order is already fully filled."})
 
@@ -833,7 +784,7 @@ def cancel_order(request):
                 subtotal = order.price * remaining_qty
                 estimated_fee = quantize_4(subtotal * COMMISSION_RATE)
                 refund_amount = subtotal + estimated_fee
-
+                
                 sim.available_cash += refund_amount
                 sim.save()
 
@@ -852,7 +803,7 @@ def cancel_order(request):
             order.save()
 
             return JsonResponse({
-                "success": True,
+                "success": True, 
                 "message": f"Order {order_id} cancelled. {remaining_qty} shares released.",
                 "available_cash": str(sim.available_cash)
             })
@@ -863,8 +814,8 @@ def cancel_order(request):
 
 def internal_matching_engine(execution_date):
     """
-    Simplified Engine:
-    Since process_transaction handles instant execution,
+    Simplified Engine: 
+    Since process_transaction handles instant execution, 
     this now only serves as a safety cleanup for the day.
     """
     # Auto-cancel any lingering non-filled orders from previous days
@@ -872,21 +823,21 @@ def internal_matching_engine(execution_date):
         status__in=[TradeOrder.OrderStatus.PENDING, TradeOrder.OrderStatus.PARTIAL],
         order_date__lt=execution_date
     )
-
+    
     count = stale_orders.count()
     stale_orders.update(status=TradeOrder.OrderStatus.CANCELLED)
-
+    
     # Return count to maintain compatibility with existing return type
     return count
 
 def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
     """
-    Handles assets transfer. Supports both P2P (b_order & s_order)
+    Handles assets transfer. Supports both P2P (b_order & s_order) 
     and P2M (one of the orders is None).
     """
     with transaction.atomic():
         subtotal = price * qty
-
+        
         # Using global constants and quantization
         buy_fee = quantize_4(subtotal * COMMISSION_RATE)
         sell_fee = quantize_4(subtotal * COMMISSION_RATE)
@@ -913,13 +864,13 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 frozen_unit_price = b_order.price + quantize_4(b_order.price * COMMISSION_RATE)
                 actual_unit_price = price + quantize_4(price * COMMISSION_RATE)
                 refund = (frozen_unit_price - actual_unit_price) * qty
-
+                
                 if refund > 0:
                     b_order.sim.available_cash += refund
                     b_order.sim.save()
-
-
-
+            
+            
+            
             # D1. Create Buyer Transaction Record
             Simulation_Transaction.objects.create(
                 sim=b_order.sim,
@@ -930,17 +881,17 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 quantity=qty,
                 price=price,
                 total_amount=subtotal + buy_fee,
-                fees=buy_fee,
+                fees=buy_fee,  
                 voucher_no=f"B{uuid.uuid4().hex[:12].upper()}",
                 matched_order=b_order,
                 opponent_order=s_order,
                 realized_pnl=ZERO
             )
 
-
+            
             #cash_before_fee = b_order.sim.available_cash
-
-
+            
+            
             #b_order.sim.available_cash -= buy_fee
             #b_order.sim.save()
 
@@ -948,10 +899,10 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
             #Simulation_Cash_Flow.objects.create(
                 #sim=b_order.sim,
                 #change_type='FEE',
-                #before_balance=cash_before_fee,
-                #amount=-buy_fee,
-                #after_balance=b_order.sim.available_cash,
-                #request_id=f"FEE_B_{b_order.id}_{int(timezone.now().timestamp())}"
+               # before_balance=cash_before_fee,      
+               # amount=-buy_fee,                     
+               # after_balance=b_order.sim.available_cash,  
+               # request_id=f"FEE_B_{b_order.id}_{int(timezone.now().timestamp())}"
             #)
         # ==========================================
         # Seller Side Logic (Only if s_order exists)
@@ -963,7 +914,7 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 s_order.sim.save()
 
             cost_at_order_time = s_order.avg_cost_snapshot or ZERO
-
+            
             # Realized PnL = (Current Execution Price - Original Cost) * Quantity - Fee
             realized_pnl = (price - cost_at_order_time) * qty - sell_fee
             print("DEBUG SELL >>>", price, cost_at_order_time, qty, realized_pnl)
@@ -978,7 +929,7 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
                 quantity=qty,
                 price=price,
                 total_amount=subtotal - sell_fee,
-                fees=sell_fee,
+                fees=sell_fee, 
                 voucher_no=f"S{uuid.uuid4().hex[:12].upper()}",
                 matched_order=s_order,
                 opponent_order=b_order,
@@ -1052,22 +1003,22 @@ def advance_simulation_date(request, sim_id=None):
         # 5. POST-MARKET SETTLEMENT: Update NAV for ALL active simulations
         # We process simulations in chunks if you have many users to avoid memory timeout.
         active_simulations = Simulation.objects.filter(status=Simulation.Status.ACTIVE)
-
+        
         for sim in active_simulations:
             # Calculate valuation based on the new closing prices
             new_nav, mkt_val = calculate_nav_optimized(sim, new_date)
-
+            
             # Update simulation record
             sim.current_virtual_date = new_date
             sim.save()
 
-            # 6. Record NAV History for UI charts
+            # 6. Record NAV History for UI Charts
             Simulation_NAV_History.objects.update_or_create(
-                sim=sim,
+                sim=sim, 
                 record_date=new_date,
                 defaults={
-                    'nav': new_nav,
-                    'cash': sim.available_cash,
+                    'nav': new_nav, 
+                    'cash': sim.available_cash, 
                     'market_value': mkt_val
                 }
             )
@@ -1084,7 +1035,7 @@ def company_financials(request, symbol):
     company = Company.objects.get(symbol=symbol)
     # Using ER Financials fields
     fin_list = Financials.objects.filter(symbol=company).order_by('-report_date')
-
+    
     reports = []
     for f in fin_list:
         # Calculate Margin on-the-fly (Industrial standard: avoid storing derived fields)
@@ -1103,42 +1054,28 @@ def company_financials(request, symbol):
     })
 
 @login_required
-def simulation_performance(request, sim_id=None):
+def simulation_performance(request, sim_id):
     """
     Generates a performance report for a specific simulation.
     Synchronized with the simulation's internal virtual clock.
     """
-    # ✅ 修复1：兼容字段名，用filter+first安全查询，不会再报AttributeError
-    sim = None
+    # Use select_for_update or simply get as it's a read-heavy view
+    sim = Simulation.objects.get(id=sim_id, user=request.user)
     
-    # 情况1：传了 sim_id，直接查询
-    if sim_id:
-        try:
-            sim = Simulation.objects.get(id=sim_id, user=request.user)
-        except Simulation.DoesNotExist:
-            pass
-    
-    # 情况2：没传sim_id，或者查不到，自动取当前用户的第一个模拟账户
-    if not sim:
-        sim = Simulation.objects.filter(user=request.user).first()
-        if not sim:
-            # 没有模拟账户，直接跳转到首页
-            return redirect('index')
-
     # CRITICAL: Use virtual date, not real-world today
     report_date = sim.current_virtual_date
-
+    
     # Calculate state based on virtual date
     total_nav, mkt_val = calculate_nav_optimized(sim, report_date)
-
+    
     # Fetch holdings and calculate value based on simulation price logic
     raw_holdings = Simulation_Holding.objects.filter(sim=sim).exclude(quantity=0).select_related('symbol')
-
+    
     processed_holdings = []
     for h in raw_holdings:
         price_rec = get_market_price(h.symbol, report_date)
         current_price = price_rec.close_price if price_rec else h.symbol.current_price
-
+        
         processed_holdings.append({
             "symbol": h.symbol,
             "quantity": h.quantity,
@@ -1146,13 +1083,13 @@ def simulation_performance(request, sim_id=None):
             "current_price": current_price,
             "market_value": quantize_4(h.quantity * current_price)
         })
-
+    
     # Performance Metrics
     profit_loss = total_nav - sim.initial_cash
     roi = (profit_loss / sim.initial_cash * 100) if sim.initial_cash > 0 else 0
-
+    
     history = Simulation_NAV_History.objects.filter(sim=sim).order_by('record_date')
-
+    
     return render(request, "stock/report.html", {
         "sim": sim,
         "holdings": processed_holdings,
@@ -1168,14 +1105,14 @@ def simulation_performance(request, sim_id=None):
 @login_required
 def stock_detail(request, symbol):
     """
-    Stock Detail View: Displays financial reports, historical price trends,
+    Stock Detail View: Displays financial reports, historical price trends, 
     and the user's current holdings based on the GLOBAL simulation clock.
     """
     from django.shortcuts import get_object_or_404
-
+    
     # 1. Fetch company basic info
     company = get_object_or_404(Company, symbol=symbol)
-
+    
     # 2. Get the GLOBAL simulation date (The Master Clock)
     global_state = GlobalSimulationState.objects.first()
     if global_state:
@@ -1184,28 +1121,28 @@ def stock_detail(request, symbol):
     else:
         # Fallback for safety
         reference_date = datetime.strptime("2026-03-02", "%Y-%m-%d").date()
-        is_market_open=True
-
+        is_market_open = True
+    
     # 3. Get the active simulation account for the current user
     active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
-
+    
     # 4. Fetch price history: ONLY records on or before the GLOBAL virtual today
     # Prevents data leaks in the historical table and charts.
-
-
+   
+    
     price_history_qs = DailyPrice.objects.filter(
         symbol=company,
         trade_date__lte=reference_date
     ).order_by('-trade_date')[:30]
     price_history = list(price_history_qs)[::-1]
 
-
+    
     yesterday_price_rec = DailyPrice.objects.filter(
         symbol=company,
-        trade_date__lt=reference_date
+        trade_date__lt=reference_date  
     ).order_by('-trade_date').first()
 
-
+    
     if yesterday_price_rec:
         current_sim_price = yesterday_price_rec.close_price
     elif price_history:
@@ -1222,7 +1159,7 @@ def stock_detail(request, symbol):
 
     # We sort by date ascending for the chart (left to right)
     chart_qs = financial_reports.order_by('report_date')
-
+    
     # Extract dates and ratios into lists
     report_dates = [f.report_date.strftime('%Y-%m') for f in chart_qs]
     debt_ratios = [float(f.debt_asset_ratio) for f in chart_qs]
@@ -1234,7 +1171,7 @@ def stock_detail(request, symbol):
     debt_ratios_json = json.dumps(debt_ratios)
     current_ratios_json = json.dumps(current_ratios)
     quick_ratios_json = json.dumps(quick_ratios)
-
+   
 
     # 6. (Optional New Feature) Fetch Pending Orders for this stock
     # This allows users to see the current "Market Depth"
@@ -1262,7 +1199,7 @@ def stock_detail(request, symbol):
     user_holding = None
     if active_sim:
         user_holding = Simulation_Holding.objects.filter(
-            sim=active_sim,
+            sim=active_sim, 
             symbol=company
         ).first()
 
@@ -1271,17 +1208,17 @@ def stock_detail(request, symbol):
     # Extract all numeric field names from the Financials model
     # This allows the frontend to show which variables are available for custom formulas
     all_financial_fields = [
-        f.name for f in Financials._meta.get_fields()
+        f.name for f in Financials._meta.get_fields() 
         if isinstance(f, (DecimalField, FloatField, IntegerField))
     ]
-
+    
     # Define fields to exclude from calculation variables
     excluded_fields = ['id', 'symbol_id']
     calculable_fields = [f for f in all_financial_fields if f not in excluded_fields]
 
     return render(request, "stock/detail.html", {
         "company": company,
-        "current_price": current_sim_price,
+        "current_price": current_sim_price, 
         "financials": financial_reports,
         "history": price_history,
         "holding": user_holding,
@@ -1300,28 +1237,28 @@ def stock_detail(request, symbol):
 def stock_history_full(request, symbol):
     """
     Dedicated view for historical price data.
-    Provides a deep dive into price movements while enforcing the
+    Provides a deep dive into price movements while enforcing the 
     simulation's virtual date boundary to prevent data leaks.
     """
     from django.shortcuts import get_object_or_404
-
+    
     # 1. Fetch company basic info (Returns 404 if symbol not found)
     company = get_object_or_404(Company, symbol=symbol)
-
+    
     # 2. Get the active simulation context for the current user
     active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
-
+    
     # 3. Determine the "Time Machine" boundary
     # If no simulation is active, default to current real-world date
     reference_date = active_sim.current_virtual_date if active_sim else timezone.now().date()
-
+    
     # 4. Fetch extended price history (limited to 100 entries)
     # CRITICAL: Added trade_date__lte filter to hide "future" market data
     price_history = DailyPrice.objects.filter(
         symbol=company,
         trade_date__lte=reference_date
     ).order_by('-trade_date')[:100]
-
+    
     # 5. Render the historical data page within the simulation context
     return render(request, "stock/history_page.html", {
         "company": company,
@@ -1333,20 +1270,20 @@ def stock_history_full(request, symbol):
 @login_required
 def portfolio_view(request):
     """
-    Omni-Simulator Adapter: Calculates P&L and Market Values synchronized with
+    Omni-Simulator Adapter: Calculates P&L and Market Values synchronized with 
     the Global Master Clock (simulation date) for the new portfolio template.
     Now includes automated NAV history tracking for the equity curve.
     """
     # Retrieve the most recent active simulation instance for the current user
     active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
-
+    
     # Initialize summary variables
     total_stock_value = Decimal('0.00')
     processed_holdings = []
 
     if active_sim:
         virtual_today = active_sim.current_virtual_date
-
+        
         # 1. Fetch raw holdings and join with Company model for metadata
         raw_holdings = Simulation_Holding.objects.filter(
             sim=active_sim
@@ -1356,16 +1293,16 @@ def portfolio_view(request):
         for h in raw_holdings:
             price_rec = get_market_price(h.symbol, virtual_today)
             hist_price = price_rec.close_price if price_rec else Decimal('0.0000')
-
+            
             mkt_val = h.quantity * hist_price
             pnl = (hist_price - h.avg_cost) * h.quantity
             if h.avg_cost != 0:
                 pnl_percent = ((hist_price - h.avg_cost) / abs(h.avg_cost) * 100)
             else:
                 pnl_percent = 0
-
+            
             total_stock_value += mkt_val
-
+            
             processed_holdings.append({
                 "symbol": h.symbol.symbol,
                 "company_name": h.symbol.full_name,
@@ -1381,7 +1318,7 @@ def portfolio_view(request):
         # CRITICAL FIX: We use the optimized engine to get total_assets to include frozen cash/shares.
         # We still use the total_stock_value from the loop above to maintain your logic flow.
         total_assets, _ = calculate_nav_optimized(active_sim, virtual_today)
-
+        
         total_pnl = total_assets - active_sim.initial_cash
         pnl_rate = (total_pnl / active_sim.initial_cash * 100) if active_sim.initial_cash > 0 else 0
 
@@ -1407,7 +1344,7 @@ def portfolio_view(request):
 
         # 1. Capture the sum. Ensure we handle negative values from the ledger.
         fee_data = Simulation_Cash_Flow.objects.filter(
-            sim=active_sim,
+            sim=active_sim, 
             change_type=Simulation_Cash_Flow.FlowType.FEE # Use the Class constant to be safe
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0.0000')
 
@@ -1430,7 +1367,7 @@ def portfolio_view(request):
             "total_fees_sum": total_fees_sum,
             "theoretical_cash": theoretical_cash,
         })
-
+    
     return render(request, "stock/portfolio.html", {"holdings_detailed": []})
 
 @login_required
@@ -1441,14 +1378,14 @@ def transactions_view(request):
     """
     active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
     recent_actions = []
-
+    
     if active_sim:
-        # We use select_related('symbol') to pre-fetch company names
+        # We use select_related('symbol') to pre-fetch company names 
         # and avoid the N+1 query problem in the template.
         recent_actions = Simulation_Transaction.objects.filter(
             sim=active_sim
         ).select_related('symbol').order_by('-trade_date', '-created_at')
-
+    
     return render(request, "stock/transactions.html", {
         "transactions": recent_actions,
         "sim": active_sim
@@ -1468,7 +1405,7 @@ def custom_500(request):
     """
     Handle Internal Server Errors (e.g., database lock timeout)
     """
-    return render(request, "errors/504.html", status=500)
+    return render(request, "errors/500.html", status=500)
 
 @login_required
 def api_calculate_custom_indicator(request):
@@ -1479,7 +1416,7 @@ def api_calculate_custom_indicator(request):
     # 1. Extract parameters from the AJAX request
     symbol = request.GET.get('symbol')
     formula = request.GET.get('formula', '').strip()
-
+    
     if not symbol or not formula:
         return JsonResponse({"success": False, "error": "Please provide both a stock symbol and a formula."})
 
@@ -1487,7 +1424,7 @@ def api_calculate_custom_indicator(request):
         # 2. Identify the company and simulation context
         company = Company.objects.get(symbol=symbol)
         active_sim = Simulation.objects.filter(user=request.user).order_by('-created_at').first()
-
+        
         # Use simulation date to prevent data leaking from the "future"
         reference_date = active_sim.current_virtual_date if active_sim else timezone.now().date()
 
@@ -1517,14 +1454,14 @@ def api_calculate_custom_indicator(request):
             # 4.1 Inject derived financial variables not present in physical DB columns
             assets = context.get('total_assets', Decimal('0'))
             liabilities = context.get('total_liabilities', Decimal('0'))
-
+            
             # Define total_equity so users can use it in formulas
             context['total_equity'] = assets - liabilities
             # --- INSERT THIS PART END ---
 
             # Calculate the result for this period
             result = safe_eval_formula(formula, context)
-
+            
             chart_labels.append(report.report_date.strftime('%Y-%m'))
             chart_values.append(float(result))
 
@@ -1540,7 +1477,7 @@ def api_calculate_custom_indicator(request):
     except Exception as e:
         # Return the specific error message (e.g., "Variable not found" or "Syntax Error")
         return JsonResponse({"success": False, "error": str(e)})
-
+    
 def generate_transaction_pdf(request, transaction_id):
     try:
         tx = Simulation_Transaction.objects.get(id=transaction_id, sim__user=request.user)
@@ -1552,51 +1489,28 @@ def generate_transaction_pdf(request, transaction_id):
     p = canvas.Canvas(buffer, pagesize=(595.27, 841.89))
     width, height = (595.27, 841.89)
 
-    # ====================== 修复汉字显示：强制字体注册 + 错误捕获 ======================
-    # 1. 优先加载你本地的微软雅黑字体
-    FONT_PATH = r"C:\Users\24300\Desktop\Stock\fonts\msyh.ttc"
-    font_loaded = False
     try:
-        # 先检查字体文件是否真实存在
-        if os.path.exists(FONT_PATH):
-            pdfmetrics.registerFont(TTFont('msyh', FONT_PATH))
-            p.setFont('msyh', 12)
-            font_loaded = True
-        else:
-            # 路径不存在时，抛出明确提示，方便你排查
-            raise FileNotFoundError(f"字体文件不存在：{FONT_PATH}")
-    except Exception as font_err:
-        print(f"⚠️  字体加载失败：{font_err}")
-        print("✅  已自动切换到系统默认中文字体，保证汉字正常显示")
-        # 2. 备选方案：用Windows系统自带的微软雅黑字体，100%兼容
-        try:
-            # Windows系统默认字体路径，几乎所有Windows电脑都有
-            SYSTEM_FONT_PATH = r"C:\Windows\Fonts\msyh.ttc"
-            pdfmetrics.registerFont(TTFont('msyh', SYSTEM_FONT_PATH))
-            p.setFont('msyh', 12)
-            font_loaded = True
-        except Exception as sys_font_err:
-            print(f"⚠️  系统字体也加载失败：{sys_font_err}")
-            # 终极兜底：用支持中文的内置字体，保证不出现方框
-            p.setFont('STSong-Light', 12)
+        pdfmetrics.registerFont(TTFont('msyh', FONT_PATH))
+        p.setFont('msyh', 12)
+    except:
+        p.setFont('Helvetica', 12)
 
-    # ====================== 凭证内容渲染（强制使用中文字体） ======================
-    # 顶部标题栏
+   
     p.setFillColorRGB(0.1, 0.1, 0.1)
     p.rect(0, height - 60, width, 60, stroke=0, fill=1)
 
+
     p.setFillColorRGB(1, 1, 1)
-    if font_loaded:
-        p.setFont('msyh', 16)
-    else:
-        p.setFont('STSong-Light', 16)
+    try: p.setFont('msyh', 16)
+    except: p.setFont('Helvetica', 16)
     p.drawString(50, height - 38, f"交易电子凭证 | {tx.sim.name}")
+
 
     p.setFillColorRGB(0, 0, 0)
     y_position = height - 100
     line_height = 25
 
-    # 凭证数据
+
     data = [
         ("凭证编号", f"{tx.voucher_no or 'N/A'}"),
         ("交易日期", f"{tx.trade_date.strftime('%Y-%m-%d %H:%M') if hasattr(tx.trade_date, 'strftime') else tx.trade_date}"),
@@ -1607,100 +1521,51 @@ def generate_transaction_pdf(request, transaction_id):
         ("手续费", f"¥{tx.fees:,.2f}"),
         ("成交总额", f"¥{tx.total_amount:,.2f}"),
     ]
-
+    
     if tx.type == 'SELL':
         data.append(("结算盈亏", f"¥{tx.realized_pnl:,.2f}"))
 
-    # 逐行渲染（强制使用中文字体）
+
     for label, value in data:
+
         p.setStrokeColorRGB(0.9, 0.9, 0.9)
         p.line(50, y_position - 5, width - 50, y_position - 5)
-
-        if font_loaded:
-            p.setFont('msyh', 10)
-        else:
-            p.setFont('STSong-Light', 10)
+        
+        try: p.setFont('msyh', 10)
+        except: p.setFont('Helvetica', 10)
         p.setFillColorRGB(0.4, 0.4, 0.4)
         p.drawString(60, y_position, label)
-
+        
         p.setFillColorRGB(0, 0, 0)
         p.drawRightString(width - 60, y_position, value)
-
+        
         y_position -= line_height
 
-    # 印章
     p.setStrokeColorRGB(0.8, 0, 0)
     p.circle(width - 100, height - 250, 40, stroke=1, fill=0)
     p.setFillColorRGB(0.8, 0, 0)
-    if font_loaded:
-        p.setFont('msyh', 10)
-    else:
-        p.setFont('STSong-Light', 10)
+    try: p.setFont('msyh', 10)
+    except: p.setFont('Helvetica', 10)
     p.drawCentredString(width - 100, height - 245, "模拟交易")
     p.drawCentredString(width - 100, height - 260, "核算专用")
 
-    # 底部备注
+    
     p.setFillColorRGB(0.6, 0.6, 0.6)
-    if font_loaded:
-        p.setFont('msyh', 8)
-    else:
-        p.setFont('STSong-Light', 8)
+    try: p.setFont('msyh', 8)
+    except: p.setFont('Helvetica', 8)
     p.drawCentredString(width/2, 50, "注：本凭证仅供模拟实验使用，不具备法律效力。")
 
     p.showPage()
     p.save()
-
+    
     buffer.seek(0)
-
+    
     filename = f"Voucher_{tx.voucher_no}.pdf" if tx.voucher_no else "Transaction_Receipt.pdf"
+    
+
 
     return HttpResponse(
-        buffer,
-        content_type='application/pdf',
+        buffer, 
+        content_type='application/pdf', 
         headers={'Content-Disposition': f'inline; filename="{filename}"'}
     )
-
-
-
-@csrf_exempt
-@login_required
-def ai_chat_api(request):
-    """
-    AI 助手对话 API 接口
-    """
-    if request.method != "POST":
-        return JsonResponse({"error": "仅支持 POST 请求"}, status=405)
-
-    try:
-        # 1. 解析前端传来的 JSON
-        data = json.loads(request.body)
-        user_message = data.get('message', '').strip()
-
-        if not user_message:
-            return JsonResponse({"reply": "您想聊点什么呢？比如：帮我分析一下持仓风险。"})
-
-        # 2. 检查 AI 引擎是否就绪
-        if not ada_brain:
-            return JsonResponse({"reply": "抱歉，AI 引擎暂时离线，请联系管理员检查 Ollama 服务。"})
-
-        # 3. 让 Agent 思考 (它会自动处理你的虚拟日期和持仓)
-        # 注意：我们在 brain.py 里已经对齐了你的 current_virtual_date 字段
-        print(f"--- [AI Request] 用户 {request.user.username} 提问: {user_message} ---")
-        ai_reply = ada_brain.think(request.user, user_message)
-
-        return JsonResponse({
-            "reply": ai_reply,
-            "status": "success"
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc() # 在终端打印错误详情方便调试
-        return JsonResponse({"reply": f"我的大脑出了一点小状况: {str(e)}"}, status=500)
-
-
-# ==========================================
-# ✅ 交易成功页面（已为你添加）
-# ==========================================
-def trade_success(request):
-    return render(request, 'stock/trade_success.html')

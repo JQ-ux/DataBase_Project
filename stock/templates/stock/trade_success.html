@@ -1,0 +1,59 @@
+{% extends "stock/base.html" %}
+{% block body %}
+<style>
+    .success-wrap {
+        max-width: 500px;
+        margin: 80px auto;
+        text-align: center;
+    }
+
+    .success-icon {
+        width: 100px;
+        height: 100px;
+        margin: 0 auto;
+        border: 5px solid #198754;
+        border-radius: 50%;
+        position: relative;
+        animation: scaleIn 0.5s ease;
+    }
+
+        .success-icon::after {
+            content: "";
+            position: absolute;
+            width: 35px;
+            height: 65px;
+            border-right: 5px solid #198754;
+            border-bottom: 5px solid #198754;
+            transform: rotate(45deg);
+            top: 15px;
+            left: 30px;
+            animation: drawTick 0.6s 0.3s forwards;
+            opacity: 0;
+        }
+
+    @keyframes scaleIn {
+        from {
+            transform: scale(0);
+            opacity: 0;
+        }
+
+        to {
+            transform: scale(1);
+            opacity: 1;
+        }
+    }
+
+    @keyframes drawTick {
+        to {
+            opacity: 1;
+        }
+    }
+</style>
+
+<div class="success-wrap">
+    <div class="success-icon"></div>
+    <h2 class="mt-4 text-success">交易已完成</h2>
+    <p class="text-muted mt-2">委托订单已成功成交</p>
+    <a href="javascript:history.back()" class="btn btn-primary mt-4">返回交易页面</a>
+</div>
+{% endblock %}
