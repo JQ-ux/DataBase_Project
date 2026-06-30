@@ -112,26 +112,38 @@ python manage.py runserver
 
 
 # 6. 身份认证与登录功能
-进入全新设计的**黑金主题登录页**，系统支持完整的用户快速注册与安全认证。界面布局简洁直观，用户登录后即可无缝开启 StockX 专属投资之旅，享受极速交易体验。
+进入全新设计的**黑金主题登录页**，如下，系统支持完整的用户快速注册与安全认证。界面布局简洁直观，用户登录后即可无缝开启 StockX 专属投资之旅，享受极速交易体验。
+<img width="2381" height="1311" alt="登录" src="https://github.com/user-attachments/assets/f1c25706-94db-4fae-957f-3da47d357b83" />
 
 
-登录后首页如下：
+登录后首页示例如下（如果没有初始操作应该是100000元启动资金）：
+<img width="2513" height="1385" alt="首页" src="https://github.com/user-attachments/assets/6b76d58d-39dc-4690-b1bd-13f3dbaafc17" />
+
 
 # 7. 股票查询与金融公式分析
 在顶栏或搜索框中输入股票代码（如 GOOGL、META）即可进行全球市场行情的高效检索。系统具备**搜索联想功能**，并支持**动态金融公式计算与曲线展示**。用户可输入自定义公式或使用预设公式（如净利率 `net_income / total_revenue`、营业利润率 `operating_income / total_revenue`、资产负债率 `total_liabilities / total_assets`），系统将实时解析并绘制波动趋势图，辅助深度基本面分析。
-效果如下：
+效果如下：<img width="2415" height="1121" alt="查询1" src="https://github.com/user-attachments/assets/31d5c96a-0d94-4170-86e7-d453ce8a802e" />
+<img width="1328" height="1312" alt="查询2" src="https://github.com/user-attachments/assets/1f291f81-c2fc-487a-8cd2-35355ad9524e" />
+
 
 # 8. 虚拟仿真交易功能
 进入股票详情页，可在交易面板输入数量进行买入或卖出下单。系统集成了即时柜台交易机制，首先简单展示基础的买入与卖出交互，流程便捷、透明，确保每笔模拟交易精准触达，模拟资金扣减与持仓更新逻辑准确。
-具体操作示例如下：
+具体操作示例如下：<img width="2518" height="1356" alt="交易" src="https://github.com/user-attachments/assets/f7dcc3dd-d858-4e67-9e1d-2f72281ce52f" />
+
 
 # 9. 持仓深度资产分析与账单生成
 点击进入“个人资产”或“持仓看板”页面，该模块包含着清晰的**持仓明细**与整体资产的**净值走势曲线图（NAV History）**，让财务分析变得直观且高效。同时，系统配备账单自动生成功能，全面记录每一笔历史盈亏并展示资金流水凭证。
-具体示例如下：
+具体示例如下：<img width="2559" height="1396" alt="交易记录" src="https://github.com/user-attachments/assets/67d9cedc-7a23-4ada-b048-c619913845e7" />
+<img width="2440" height="1245" alt="持仓" src="https://github.com/user-attachments/assets/73eeb66d-b0ee-4b2c-895f-36b4d76e916f" />
+
+凭证示例如下：<img width="1313" height="991" alt="凭证" src="https://github.com/user-attachments/assets/f46fedcc-152a-48f9-9ffb-85c4de591a8a" />
+
+
 
 # 10. 本地大模型智能助手 (Ada-Finance AI)
 点击右下角对话挂件可唤醒 Ada智能助手。该功能基于 **RAG（检索增强生成）技术**，在本地部署 **Qwen2.5:7b** 大语言模型与 **nomic-embed-text** 嵌入模型。助手能够感知当前系统的虚拟时钟，结合用户的私有持仓数据库进行实时检索，支持多轮连续对话，提供深度的行情诊断与个性化风险评估，且所有推理均在本地完成，保障数据不出内网。
-具体示例如下：
+具体示例如下：<img width="580" height="782" alt="智能体2" src="https://github.com/user-attachments/assets/a08a066d-e710-4511-b9f9-41423fcb3575" />
+
 
 # 11. 自动化测试与数据初始化（重要验证步骤）
 为了完整测试系统的曲线分析与历史账单功能，系统提供了自动化数据填充脚本。在激活虚拟环境后运行：
