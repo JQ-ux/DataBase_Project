@@ -111,7 +111,12 @@ python manage.py runserver
 # 5. 访问系统：请在浏览器输入 http://127.0.0.1:8000
 
 
-# 6. 身份认证与登录功能
+# 6. 身份注册与登录功能
+先注册，可选择是否为管理员身份
+<img width="2092" height="1213" alt="注册" src="https://github.com/user-attachments/assets/057b9ac6-27c1-4020-a03d-def2dd50aa8a" />
+
+
+
 进入全新设计的**黑金主题登录页**，如下，系统支持完整的用户快速注册与安全认证。界面布局简洁直观，用户登录后即可无缝开启 StockX 专属投资之旅，享受极速交易体验。
 <img width="2381" height="1311" alt="登录" src="https://github.com/user-attachments/assets/f1c25706-94db-4fae-957f-3da47d357b83" />
 
@@ -143,9 +148,15 @@ python manage.py runserver
 # 10. 本地大模型智能助手 (Ada-Finance AI)
 点击右下角对话挂件可唤醒 Ada智能助手。该功能基于 **RAG（检索增强生成）技术**，在本地部署 **Qwen2.5:7b** 大语言模型与 **nomic-embed-text** 嵌入模型。助手能够感知当前系统的虚拟时钟，结合用户的私有持仓数据库进行实时检索，支持多轮连续对话，提供深度的行情诊断与个性化风险评估，且所有推理均在本地完成，保障数据不出内网。
 具体示例如下：<img width="580" height="782" alt="智能体2" src="https://github.com/user-attachments/assets/a08a066d-e710-4511-b9f9-41423fcb3575" />
+# 11. 推进日期，删除和添加股票（仅限管理员）
+
+管理员点击上架或者下架股票的按钮可以实现股票的删除和添加，以及管理员点击进入下一交易日的按钮可以推进交易日期
+<img width="1105" height="975" alt="image" src="https://github.com/user-attachments/assets/1ab93303-fd01-4978-ae63-3c0d8bdc257e" />
 
 
-# 11. 自动化测试与数据初始化（重要验证步骤）
+# 12. 自动化测试与数据初始化（重要验证步骤）
 为了完整测试系统的曲线分析与历史账单功能，系统提供了自动化数据填充脚本。在激活虚拟环境后运行：
 ```bash
 python populate_history.py
+
+
