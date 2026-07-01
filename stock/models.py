@@ -14,13 +14,42 @@ ZERO = Decimal('0.0000')
 # ==========================================
 # 1. User Model
 # ==========================================
+
 class User(AbstractUser):
+    # 定义角色常量
+    ROLE_ADMIN = 'admin'
+    ROLE_TRADER = 'trader'
+    
+    ROLE_CHOICES = [
+        (ROLE_ADMIN, '管理员'),
+        (ROLE_TRADER, '普通交易员'),
+    ]
+
     gender = models.CharField(max_length=20, blank=True, null=True)
     account_balance = models.DecimalField(
         max_digits=20, 
         decimal_places=4, 
         default=Decimal('100000.0000')
     )
+    
+    # 新增角色字段，默认是普通交易员
+    role = models.CharField(
+        max_length=10, 
+        choices=ROLE_CHOICES, 
+        default=ROLE_TRADER,
+        verbose_name="用户角色"
+    )
+
+    # 快捷属性：判断是否为管理员
+    @property
+    def is_admin(self):
+        return self.role == self.ROLE_ADMIN or self.is_staff or self.is_superuser
+
+    def save(self, *args, **kwargs):
+        # 联动机制：如果是管理员，自动将 Django 内置的 is_staff 设为 True，方便登录后台
+        if self.role == self.ROLE_ADMIN:
+            self.is_staff = True
+        super().save(*args, **kwargs)
 
 # ==========================================
 # 2. Market Reference Data
@@ -50,6 +79,7 @@ class Company(models.Model):
     trailing_pe = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     price_sales = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     current_price = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    is_active = models.BooleanField(default=True, verbose_name="是否上架")
 
     def __str__(self):
         return self.symbol

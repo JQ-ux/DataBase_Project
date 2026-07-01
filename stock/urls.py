@@ -50,8 +50,11 @@ urlpatterns = [
     # 6. Reports & Documents (New Section)
     path("transaction/pdf/<int:transaction_id>/", views.generate_transaction_pdf, name="generate_transaction_pdf"),
 
+    
+
     # ==========================================
-    # 交易成功页面（你新加的）
+    # 7. 证券管理控制台接口
     # ==========================================
-    path("trade/success/", views.trade_success, name="trade_success"),
+    path("add_company/", views.add_company, name="add_company"),
+    path("delete_company/", views.delete_company, name="delete_company"),
 ]

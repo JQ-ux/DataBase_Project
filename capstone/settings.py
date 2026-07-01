@@ -84,3 +84,13 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
+
+
+# ==============================================================================
+# 11. 自定义数据导入 CSV 路径配置
+# ==============================================================================
+
+COMPANIES_CSV_PATH = BASE_DIR / 'data' / 'companies.csv'
+FINANCIALS_CSV_PATH = BASE_DIR / 'data' / 'financials.csv'
+DAILY_PRICES_CSV_PATH = BASE_DIR / 'data' / 'daily_prices.csv'
+

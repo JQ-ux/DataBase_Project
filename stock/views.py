@@ -34,7 +34,18 @@ from django.http import HttpResponse
 import io
 import uuid
 from agents.brain import FinancialBrain
+import traceback
+from django.http import HttpResponse
+from django.contrib.auth.decorators import user_passes_test
+from django.shortcuts import redirect
+from django.contrib import messages
+from django.conf import settings
+import csv
 
+
+COMPANIES_CSV_PATH = settings.COMPANIES_CSV_PATH
+FINANCIALS_CSV_PATH = settings.FINANCIALS_CSV_PATH
+DAILY_PRICES_CSV_PATH = settings.DAILY_PRICES_CSV_PATH
 
 try:
     print("--- [System] 正在初始化 Ada-Finance AI 引擎... ---")
@@ -57,6 +68,21 @@ INITIAL_BALANCE = Decimal('100000.00')
 PRECISION_4 = Decimal('0.0001')
 PRECISION_2 = Decimal('0.01')
 COMMISSION_RATE = Decimal('0.0003') # 0.03% Transaction Fee
+
+
+
+# 1. 装饰器定义
+def admin_required(view_func):
+    """
+    管理员权限校验装饰器
+    """
+    actual_decorator = user_passes_test(
+        lambda u: u.is_authenticated and u.is_admin,
+        login_url='login'
+    )
+    return actual_decorator(view_func)
+
+
 
 def safe_eval_formula(formula_str, context):
     """
@@ -261,6 +287,12 @@ def register_view(request):
                 user.last_name = d.get('lastname', '')
                 user.gender = d.get('gender', 'Other')
                 user.account_balance = INITIAL_BALANCE
+                
+                # 【核心新增】：接收前端传入的账户类型（'trader' 或 'admin'），并写入对应字段
+                # 如果前端没传，默认设为 'trader'
+                user.role = d.get('role', 'trader') 
+                
+                # 保存时会自动触发你写的 `save()` 联动机制：如果是管理员，自动设 is_staff = True
                 user.save()
 
                 # 3. Create the Simulation instance synced to Global Clock
@@ -291,8 +323,7 @@ def register_view(request):
             return render(request, "stock/register.html", {"message": str(e)})
 
     return render(request, "stock/register.html")
-import traceback
-from django.http import HttpResponse
+
 
 @csrf_exempt
 def login_view(request):
@@ -1011,7 +1042,7 @@ def execute_settlement(b_order, s_order, qty, price, trade_date, price_rec):
 def is_superuser(user):
     return user.is_authenticated and user.is_superuser
 
-@user_passes_test(is_superuser)
+@user_passes_test(lambda u: u.is_authenticated and u.is_admin, login_url='login')
 def advance_simulation_date(request, sim_id=None):
     """
     Global System Clock Controller.
@@ -1704,3 +1735,151 @@ def ai_chat_api(request):
 # ==========================================
 def trade_success(request):
     return render(request, 'stock/trade_success.html')
+
+
+
+
+@csrf_exempt
+@admin_required
+def delete_company(request):
+    """
+    股票下架视图（物理删除）：
+    直接从数据库中彻底抹除该证券及其所有关联资产数据，使其在系统中彻底消失。
+    本地 CSV 保持不动。
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST method required"}, status=405)
+
+    symbol = request.POST.get('symbol', '').strip().upper()
+    if not symbol:
+        messages.error(request, "请输入股票代码。")
+        return redirect("/")
+
+    try:
+        # 寻找该股票
+        company = Company.objects.get(symbol=symbol)
+        
+        # 执行物理删除（彻底从 DB 中移除）
+        company.delete()
+        
+        messages.success(request, f"证券 {symbol} 已成功从系统中彻底物理下架（所有关联价格、财务数据已销毁）。")
+        return redirect("/") 
+
+    except Company.DoesNotExist:
+        messages.error(request, f"下架失败：系统中不存在证券 {symbol}。")
+        return redirect("/")
+    except Exception as e:
+        messages.error(request, f"下架失败: {str(e)}")
+        return redirect("/")
+
+
+@csrf_exempt
+@admin_required
+def add_company(request):
+    """
+    上架/添加股票视图（全新物理导入）：
+    1. 检查股票在系统中是否已存在。
+    2. 存在则提示重复；不存在则从三个本地 CSV 路径清洗并全新导入。
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST method required"}, status=405)
+        
+    symbol = request.POST.get('symbol', '').strip().upper()
+    if not symbol:
+        messages.error(request, "请输入股票代码。")
+        return redirect("/")
+
+    # 检查数据库中是否已存在该股票
+    existing_company = Company.objects.filter(symbol=symbol).first()
+    if existing_company:
+        messages.warning(request, f"上架失败：证券 {symbol} 已经在系统中。")
+        return redirect("/")
+
+    try:
+        with transaction.atomic():
+            company_info = None
+            if not os.path.exists(COMPANIES_CSV_PATH):
+                messages.error(request, "未找到 companies.csv 基础数据文件。")
+                return redirect("/")
+                
+            with open(COMPANIES_CSV_PATH, mode='r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('symbol', '').strip().upper() == symbol:
+                        company_info = row
+                        break
+            
+            if not company_info:
+                messages.error(request, f"在基础 CSV 中未匹配到代码 {symbol}，请确认代码是否正确。")
+                return redirect("/")
+
+            # 创建主体公司资产
+            company = Company.objects.create(
+                symbol=symbol,
+                full_name=company_info.get('full_name', ''),
+                is_active=True 
+            )
+
+            # 统一的数据清洗函数
+            def safe_decimal(val):
+                if not val:
+                    return Decimal('0')
+                cleaned = str(val).strip().replace('¥', '').replace('$', '').replace(',', '')
+                if cleaned in ('', '-', 'N/A', 'null', 'None'):
+                    return Decimal('0')
+                try:
+                    return Decimal(cleaned)
+                except Exception:
+                    return Decimal('0')
+
+            # ---- 从 CSV 重新灌入该股票的财务数据 ----
+            if os.path.exists(FINANCIALS_CSV_PATH):
+                with open(FINANCIALS_CSV_PATH, mode='r', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    financial_instances = []
+                    for row in reader:
+                        if row.get('symbol', '').strip().upper() == symbol:
+                            financial_instances.append(Financials(
+                                symbol=company,
+                                report_date=datetime.strptime(row['report_date'], '%Y-%m-%d').date(),
+                                total_revenue=int(safe_decimal(row.get('total_revenue'))),
+                                gross_profit=int(safe_decimal(row.get('gross_profit'))),
+                                operating_income=int(safe_decimal(row.get('operating_income'))),
+                                net_income=int(safe_decimal(row.get('net_income'))),
+                                basic_eps=safe_decimal(row.get('basic_eps')),
+                                total_assets=int(safe_decimal(row.get('total_assets'))), 
+                                total_liabilities=int(safe_decimal(row.get('total_liabilities'))),
+                                current_assets=int(safe_decimal(row.get('current_assets'))),
+                                current_liabilities=int(safe_decimal(row.get('current_liabilities'))),
+                                inventory=int(safe_decimal(row.get('inventory', '0'))),
+                            ))
+                    if financial_instances:
+                        Financials.objects.bulk_create(financial_instances)
+
+            # ---- 从 CSV 重新灌入该股票的历史价格数据 ----
+            price_count = 0
+            if os.path.exists(DAILY_PRICES_CSV_PATH):
+                with open(DAILY_PRICES_CSV_PATH, mode='r', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    price_instances = []
+                    for row in reader:
+                        if row.get('symbol', '').strip().upper() == symbol:
+                            price_instances.append(DailyPrice(
+                                symbol=company,
+                                trade_date=datetime.strptime(row['trade_date'], '%Y-%m-%d').date(),
+                                open_price=safe_decimal(row.get('open_price')),
+                                high_price=safe_decimal(row.get('high_price')),
+                                low_price=safe_decimal(row.get('low_price')),
+                                close_price=safe_decimal(row.get('close_price')),
+                                volume=int(safe_decimal(row.get('volume', 0)))
+                            ))
+                    if price_instances:
+                        DailyPrice.objects.bulk_create(price_instances)
+                        price_count = len(price_instances)
+
+        messages.success(request, f"成功将证券 {symbol} 重新导入系统并上架！共灌入 {price_count} 条价格数据。")
+        return redirect("/")
+
+    except Exception as e:
+        messages.error(request, f"数据重新加载导入失败: {str(e)}")
+        return redirect("/")
